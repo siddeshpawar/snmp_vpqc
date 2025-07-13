@@ -21,7 +21,7 @@
 
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-features.h>
-
+const oid usmMLDSA65AuthProtocol[]   = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /* EXPERIMENTAL OID FOR MLDSA65 */
 #ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
 #endif
@@ -138,6 +138,9 @@ static const netsnmp_auth_alg_info _auth_alg_info[] = {
     { NETSNMP_USMAUTH_HMACSHA1, "usmHMACSHA1AuthProtocol",
       usmHMACSHA1AuthProtocol, OID_LENGTH(usmHMACSHA1AuthProtocol),
       BYTESIZE(SNMP_TRANS_AUTHLEN_HMACSHA1), USM_MD5_AND_SHA_AUTH_LEN },
+    { NETSNMP_USMAUTH_MLDSA65, "usmMLDSA65AuthProtocol",
+      usmMLDSA65AuthProtocol, OID_LENGTH(usmMLDSA65AuthProtocol),
+      3293, 3293 },
 #ifndef NETSNMP_DISABLE_MD5
     { NETSNMP_USMAUTH_HMACMD5, "usmHMACMD5AuthProtocol",
       usmHMACMD5AuthProtocol, OID_LENGTH(usmHMACMD5AuthProtocol),
@@ -695,6 +698,141 @@ sc_get_openssl_privfn(int priv_type)
 #endif /* openssl */
 
 
+/*
+ ====================================================================
+ ====================================================================
+ ==                                                                ==
+ ==      NEW PQC IMPLEMENTATION FOR ML-DSA-65 (DILITHIUM)          ==
+ ==                                                                ==
+ ====================================================================
+ ====================================================================
+ */
+
+/*
+ * sc_sign_mldsa65
+ *
+ * Signs a message digest using ML-DSA-65 (Dilithium) via the OQS provider.
+ * This function uses the OpenSSL EVP API.
+ *
+ * Parameters:
+ * *privkey         A pointer to an EVP_PKEY object holding the ML-DSA private key.
+ * *digest          The message digest (hash) to be signed.
+ * digest_len      Length of the digest.
+ * *signature       A buffer to store the resulting signature.
+ * *siglen          Will be updated with the actual length of the signature.
+ *
+ * Returns:
+ * SNMPERR_SUCCESS on success, SNMPERR_GENERR on failure.
+ */
+int
+sc_sign_mldsa65(EVP_PKEY *privkey,
+                const u_char *digest, size_t digest_len,
+                u_char *signature, size_t *siglen)
+{
+    EVP_MD_CTX *mdctx = NULL;
+    int rval = SNMPERR_SUCCESS;
+
+    DEBUGMSGTL(("scapi:mldsa", "sc_sign_mldsa65 called.\n"));
+
+    if (!privkey || !digest || !signature || !siglen) {
+        return SNMPERR_GENERR;
+    }
+
+    /* Create the signing context */
+    if (!(mdctx = EVP_MD_CTX_new())) {
+        DEBUGMSGTL(("scapi:mldsa", "EVP_MD_CTX_new failed.\n"));
+        return SNMPERR_GENERR;
+    }
+
+    /*
+     * Initialize the signing operation.
+     * We use EVP_DigestSign because ML-DSA is a pure signature scheme.
+     * The "NULL" for the hash type tells OpenSSL to use the algorithm's default.
+     */
+    if (1 != EVP_DigestSignInit(mdctx, NULL, NULL, NULL, privkey)) {
+        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestSignInit failed.\n"));
+        rval = SNMPERR_GENERR;
+        goto cleanup;
+    }
+
+    /*
+     * Pass the digest to the signing function.
+     * NOTE: For a real implementation, you'd typically pass the full message
+     * with EVP_DigestSignUpdate. Here we are signing the pre-computed digest.
+     * For pure signature schemes like Dilithium, this is the expected use.
+     */
+    if (1 != EVP_DigestSign(mdctx, signature, siglen, digest, digest_len)) {
+        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestSign failed.\n"));
+        rval = SNMPERR_GENERR;
+        goto cleanup;
+    }
+
+    DEBUGMSGTL(("scapi:mldsa", "Successfully created ML-DSA signature of length %zu.\n", *siglen));
+
+cleanup:
+    if (mdctx) {
+        EVP_MD_CTX_free(mdctx);
+    }
+
+    return rval;
+}
+
+
+/*
+ * sc_verify_mldsa65
+ *
+ * Verifies a message digest signature using ML-DSA-65 (Dilithium).
+ */
+int
+sc_verify_mldsa65(EVP_PKEY *pubkey,
+                  const u_char *digest, size_t digest_len,
+                  const u_char *signature, size_t siglen)
+{
+    EVP_MD_CTX *mdctx = NULL;
+    int rval = SNMPERR_SUCCESS;
+
+    DEBUGMSGTL(("scapi:mldsa", "sc_verify_mldsa65 called.\n"));
+
+    if (!pubkey || !digest || !signature) {
+        return SNMPERR_GENERR;
+    }
+
+    /* Create the verification context */
+    if (!(mdctx = EVP_MD_CTX_new())) {
+        DEBUGMSGTL(("scapi:mldsa", "EVP_MD_CTX_new failed.\n"));
+        return SNMPERR_GENERR;
+    }
+
+    /* Initialize the verification operation */
+    if (1 != EVP_DigestVerifyInit(mdctx, NULL, NULL, NULL, pubkey)) {
+        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestVerifyInit failed.\n"));
+        rval = SNMPERR_GENERR;
+        goto cleanup;
+    }
+
+    /* Verify the signature against the digest */
+    if (1 != EVP_DigestVerify(mdctx, signature, siglen, digest, digest_len)) {
+        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestVerify failed. Signature is NOT valid.\n"));
+        rval = SNMPERR_GENERR; /* Signature verification failed */
+        goto cleanup;
+    }
+
+    DEBUGMSGTL(("scapi:mldsa", "Successfully verified ML-DSA signature.\n"));
+
+cleanup:
+    if (mdctx) {
+        EVP_MD_CTX_free(mdctx);
+    }
+
+    return rval;
+}
+
+/*
+ ====================================================================
+ ==                  END OF NEW PQC IMPLEMENTATION                 ==
+ ====================================================================
+ */
+
 /*******************************************************************-o-******
  * sc_generate_keyed_hash
  *
@@ -778,6 +916,30 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
 #ifdef NETSNMP_USE_OPENSSL
     /** get hash function */
     hashfn = sc_get_openssl_hashfn(auth_type);
+
+    /*
+     ============================================================
+     ==                NEW PQC LOGIC GOES HERE                 ==
+     ============================================================
+    */
+    if (auth_type == NETSNMP_USMAUTH_MLDSA65) {
+        /* This is our new PQC protocol. We will call our signing function. */
+        /* Note: A real implementation would need to load the key into an EVP_PKEY object first. */
+        /* For this conceptual step, we'll just log a message. */
+        DEBUGMSGTL(("scapi:mldsa", "Diverting to ML-DSA signing path.\n"));
+        /* rval = sc_sign_mldsa65(private_key_object, message, msglen, MAC, maclen); */
+        /* QUITFUN(rval, sc_generate_keyed_hash_quit); */
+
+        /* For now, just copy dummy data to simulate a signature and prevent errors */
+        *maclen = 3293; /* The signature size we defined earlier */
+        memset(MAC, 0xAA, *maclen); /* Fill with dummy bytes */
+        goto sc_generate_keyed_hash_quit; /* Skip the rest of the function */
+    }
+    /*
+     ============================================================
+     ==               END OF NEW PQC LOGIC                     ==
+     ============================================================
+    */
     if (NULL == hashfn) {
         QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
     }

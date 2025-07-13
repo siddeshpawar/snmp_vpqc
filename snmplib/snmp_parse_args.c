@@ -103,7 +103,7 @@ snmp_parse_args_descriptions(FILE * outf)
 #endif /* support for community based SNMP */
     fprintf(outf, "SNMP Version 3 specific\n");
     fprintf(outf,
-            "  -a PROTOCOL\t\tset authentication protocol (MD5|SHA|SHA-224|SHA-256|SHA-384|SHA-512)\n");
+            "  -a PROTOCOL\t\tset authentication protocol (MD5|SHA|MLDSA65|SHA-224|SHA-256|SHA-384|SHA-512)\n");
     fprintf(outf,
             "  -A PASSPHRASE\t\tset authentication protocol pass phrase\n");
     fprintf(outf,

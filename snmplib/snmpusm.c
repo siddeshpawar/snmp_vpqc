@@ -181,6 +181,7 @@ static const usm_alg_type_t usm_auth_type[] = {
     { "SHA-512",  NETSNMP_USMAUTH_HMAC384SHA512 },
     { "SHA512",  NETSNMP_USMAUTH_HMAC384SHA512 },
 #endif
+    { "MLDSA65", NETSNMP_USMAUTH_MLDSA65 },
     { NULL, -1 }
 };
 

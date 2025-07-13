@@ -25,9 +25,10 @@ extern          "C" {
 #define NETSNMP_USMAUTH_HMAC192SHA256     5 /* RFC 7860; MUST */
 #define NETSNMP_USMAUTH_HMAC256SHA384     6 /* RFC 7860; OPTIONAL */
 #define NETSNMP_USMAUTH_HMAC384SHA512     7 /* RFC 7860; SHOULD */
+#define NETSNMP_USMAUTH_MLDSA65           8 /* EXPERIMENTAL */
 
 NETSNMP_IMPORT const oid usmNoAuthProtocol[10];
-
+NETSNMP_IMPORT const oid usmMLDSA65AuthProtocol[];
 #ifndef NETSNMP_DISABLE_MD5
 NETSNMP_IMPORT const oid usmHMACMD5AuthProtocol[10];
 #endif
