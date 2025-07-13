@@ -127,7 +127,7 @@ const oid usmHMAC192SHA256AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
                                             NETSNMP_USMAUTH_HMAC192SHA256 };
 const oid usmHMAC128SHA224AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
                                             NETSNMP_USMAUTH_HMAC128SHA224 };
-#endif /* HAVE_EVP_SHA384 */
+#endif /* HAVE_EVP_SHA224 */
 
 const oid usmNoPrivProtocol[10] = { 1, 3, 6, 1, 6, 3, 10, 1, 2, 1 };
 
@@ -162,27 +162,47 @@ typedef struct usm_alg_type_s {
 } usm_alg_type_t;
 
 static const usm_alg_type_t usm_auth_type[] = {
-    { "NOAUTH", NETSNMP_USMAUTH_NOAUTH },
-    { "SHA", NETSNMP_USMAUTH_HMACSHA1 },
-    { "SHA-1", NETSNMP_USMAUTH_HMACSHA1 },
-    { "SHA1", NETSNMP_USMAUTH_HMACSHA1 },
+    {"noauth", NETSNMP_USMAUTH_NOAUTH},
+    {"none", NETSNMP_USMAUTH_NOAUTH},
 #ifndef NETSNMP_DISABLE_MD5
-    { "MD5", NETSNMP_USMAUTH_HMACMD5 },
+    {"md5", NETSNMP_USMAUTH_HMACMD5},
+    {"MD5", NETSNMP_USMAUTH_HMACMD5},
 #endif
+    {"sha", NETSNMP_USMAUTH_HMACSHA1},
+    {"SHA", NETSNMP_USMAUTH_HMACSHA1},
+    {"sha1", NETSNMP_USMAUTH_HMACSHA1},
+    {"SHA1", NETSNMP_USMAUTH_HMACSHA1},
 #ifdef HAVE_EVP_SHA224
-    { "SHA-224", NETSNMP_USMAUTH_HMAC128SHA224 },
-    { "SHA224", NETSNMP_USMAUTH_HMAC128SHA224 },
-    { "SHA-256", NETSNMP_USMAUTH_HMAC192SHA256 },
-    { "SHA256", NETSNMP_USMAUTH_HMAC192SHA256 },
+    {"sha224", NETSNMP_USMAUTH_HMAC128SHA224},
+    {"SHA224", NETSNMP_USMAUTH_HMAC128SHA224},
+    {"sha-224", NETSNMP_USMAUTH_HMAC128SHA224},
+    {"SHA-224", NETSNMP_USMAUTH_HMAC128SHA224},
+    {"sha256", NETSNMP_USMAUTH_HMAC192SHA256},
+    {"SHA256", NETSNMP_USMAUTH_HMAC192SHA256},
+    {"sha-256", NETSNMP_USMAUTH_HMAC192SHA256},
+    {"SHA-256", NETSNMP_USMAUTH_HMAC192SHA256},
 #endif
 #ifdef HAVE_EVP_SHA384
-    { "SHA-384", NETSNMP_USMAUTH_HMAC256SHA384 },
-    { "SHA384", NETSNMP_USMAUTH_HMAC256SHA384 },
-    { "SHA-512",  NETSNMP_USMAUTH_HMAC384SHA512 },
-    { "SHA512",  NETSNMP_USMAUTH_HMAC384SHA512 },
+    {"sha384", NETSNMP_USMAUTH_HMAC256SHA384},
+    {"SHA384", NETSNMP_USMAUTH_HMAC256SHA384},
+    {"sha-384", NETSNMP_USMAUTH_HMAC256SHA384},
+    {"SHA-384", NETSNMP_USMAUTH_HMAC256SHA384},
+    {"sha512", NETSNMP_USMAUTH_HMAC384SHA512},
+    {"SHA512", NETSNMP_USMAUTH_HMAC384SHA512},
+    {"sha-512", NETSNMP_USMAUTH_HMAC384SHA512},
+    {"SHA-512", NETSNMP_USMAUTH_HMAC384SHA512},
 #endif
-    { "MLDSA65", NETSNMP_USMAUTH_MLDSA65 },
-    { NULL, -1 }
+    /* ADD THESE LINES FOR PQC SUPPORT */
+    {"mldsa65", NETSNMP_USMAUTH_MLDSA65},
+    {"MLDSA65", NETSNMP_USMAUTH_MLDSA65},
+    {"mldsa-65", NETSNMP_USMAUTH_MLDSA65},
+    {"MLDSA-65", NETSNMP_USMAUTH_MLDSA65},
+    {"dilithium65", NETSNMP_USMAUTH_MLDSA65},
+    {"DILITHIUM65", NETSNMP_USMAUTH_MLDSA65},
+    {"dilithium-65", NETSNMP_USMAUTH_MLDSA65},
+    {"DILITHIUM-65", NETSNMP_USMAUTH_MLDSA65},
+    /* END PQC ADDITIONS */
+    {NULL, 0}
 };
 
 static const usm_alg_type_t usm_priv_type[] = {
@@ -206,7 +226,11 @@ static const usm_alg_type_t usm_priv_type[] = {
     { "AES256C", USM_CREATE_USER_PRIV_AES256_CISCO },
 #endif
 #endif
-    { NULL, -1 },
+    /* ADD THESE LINES FOR FUTURE PQC PRIVACY SUPPORT */
+    {"mldsa65-aes", NETSNMP_USMPRIV_MLDSA65_AES},
+    {"MLDSA65-AES", NETSNMP_USMPRIV_MLDSA65_AES},
+    /* END PQC PRIVACY ADDITIONS */
+    {NULL, 0}
 };
 
 static u_int    dummy_etime, dummy_eboot;       /* For ISENGINEKNOWN(). */
@@ -2167,12 +2191,12 @@ usm_rgenerate_out_msg(int msgProcModel, /* (UNUSED) */
         if (USM_CREATE_USER_PRIV_DES == (priv_type & USM_PRIV_MASK_ALG)) {
             salt_length = BYTESIZE(USM_DES_SALT_LENGTH);
             save_salt_length = BYTESIZE(USM_DES_SALT_LENGTH);
-            if (!thePrivKey || (usm_set_salt(salt, &salt_length,
-                                             thePrivKey + 8,
-                                             thePrivKeyLength - 8,
-                                             iv) == -1)) {
+            if (!(thePrivKey || !usm_set_salt(iv, &salt_length,
+                                            thePrivKey + 8,
+                                            thePrivKeyLength - 8,
+                                            salt) == -1)) {
                 DEBUGMSGTL(("usm", "Can't set DES-CBC salt.\n"));
-                SNMP_FREE(ciphertext);
+                SNMP_FREE(thePrivKey);
                 return SNMPERR_USM_GENERICERROR;
             }
         }
@@ -2180,7 +2204,7 @@ usm_rgenerate_out_msg(int msgProcModel, /* (UNUSED) */
 #ifdef NETSNMP_ENABLE_TESTING_CODE
         if (debug_is_token_registered("usm/dump") == SNMPERR_SUCCESS) {
             dump_chunk("usm/dump", "This data was encrypted:",
-                       scopedPdu, scopedPduLen);
+                      scopedPdu, scopedPduLen);
         }
 #endif
 
@@ -2444,7 +2468,7 @@ usm_secmod_rgenerate_out_msg(struct snmp_secmod_outgoing_params *parms)
                                  parms->wholeMsg, parms->wholeMsgLen,
                                  parms->wholeMsgOffset);
 }
-#endif                          /* */
+#endif                          /* NETSNMP_USE_REVERSE_ASNENCODING*/
 
 /*******************************************************************-o-******
  * usm_parse_security_parameters

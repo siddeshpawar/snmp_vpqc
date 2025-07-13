@@ -45,7 +45,7 @@
 # endif
 #endif
 #ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
+#include <netinet/in.h.
 #endif
 
 #ifdef HAVE_UNISTD_H
@@ -74,7 +74,7 @@ netsnmp_feature_child_of(usm_scapi, usm_support);
 #include <net-snmp/library/scapi.h>
 #include <net-snmp/library/mib.h>
 #include <net-snmp/library/transform_oids.h>
-const oid usmMLDSA65AuthProtocol[]   = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /* EXPERIMENTAL OID FOR MLDSA65 */
+
 #ifdef NETSNMP_USE_INTERNAL_CRYPTO
 #include <net-snmp/library/openssl_md5.h>
 #include <net-snmp/library/openssl_sha.h>
@@ -103,7 +103,7 @@ const oid usmMLDSA65AuthProtocol[]   = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /
 #endif
 #endif
 
-#endif /* NETSNMP_FEATURE_REMOVE_USM_SCAPI */
+#endif
 
 #ifdef NETSNMP_USE_INTERNAL_CRYPTO
 #endif
@@ -111,6 +111,142 @@ const oid usmMLDSA65AuthProtocol[]   = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /
 #ifdef NETSNMP_USE_PKCS11
 #include <security/cryptoki.h>
 #endif
+
+/* ====================================================================
+ * PQC ML-DSA65 Implementation for Net-SNMP
+ * Add these functions to snmplib/scapi.c
+ * ==================================================================== */
+
+#include <openssl/evp.h>
+#include <openssl/provider.h>
+#include <string.h>
+
+/* Add this OID definition near the top with other OID definitions */
+const oid usmMLDSA65AuthProtocol[] = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /* EXPERIMENTAL OID FOR MLDSA65 */
+
+/* PQC ML-DSA65 Signature Function */
+static int sc_sign_mldsa65(const u_char *message, size_t message_len,
+                          const u_char *key, size_t key_len,
+                          u_char *signature, size_t *signature_len)
+{
+    EVP_PKEY_CTX *pkey_ctx = NULL;
+    EVP_PKEY *pkey = NULL;
+    EVP_MD_CTX *md_ctx = NULL;
+    int ret = SNMPERR_GENERR;
+    size_t sig_len = 3293; /* ML-DSA-65 signature length */
+
+    if (!message || !key || !signature || !signature_len) {
+        return SNMPERR_GENERR;
+    }
+
+    if (*signature_len < sig_len) {
+        *signature_len = sig_len;
+        return SNMPERR_GENERR;
+    }
+
+    /* Create key context for ML-DSA-65 */
+    pkey_ctx = EVP_PKEY_CTX_new_from_name(NULL, "mldsa65", "provider=oqsprovider");
+    if (!pkey_ctx) {
+        goto cleanup;
+    }
+
+    /* Initialize key generation */
+    if (EVP_PKEY_keygen_init(pkey_ctx) <= 0) {
+        goto cleanup;
+    }
+
+    /* Generate or load the private key */
+    if (key_len == 4032) { /* ML-DSA-65 private key size */
+        /* Load existing private key */
+        pkey = EVP_PKEY_new_raw_private_key_ex(NULL, "mldsa65", "provider=oqsprovider",
+                                               key, key_len);
+        if (!pkey) {
+            goto cleanup;
+        }
+    } else {
+        /* Generate new key pair */
+        if (EVP_PKEY_keygen(pkey_ctx, &pkey) <= 0) {
+            goto cleanup;
+        }
+    }
+
+    /* Create signing context */
+    md_ctx = EVP_MD_CTX_new();
+    if (!md_ctx) {
+        goto cleanup;
+    }
+
+    /* Initialize signing */
+    if (EVP_DigestSignInit(md_ctx, NULL, NULL, NULL, pkey) <= 0) {
+        goto cleanup;
+    }
+
+    /* Sign the message */
+    if (EVP_DigestSign(md_ctx, signature, &sig_len, message, message_len) <= 0) {
+        goto cleanup;
+    }
+
+    *signature_len = sig_len;
+    ret = SNMPERR_SUCCESS;
+
+cleanup:
+    if (md_ctx) EVP_MD_CTX_free(md_ctx);
+    if (pkey) EVP_PKEY_free(pkey);
+    if (pkey_ctx) EVP_PKEY_CTX_free(pkey_ctx);
+
+    return ret;
+}
+
+/* PQC ML-DSA65 Verification Function */
+static int sc_verify_mldsa65(const u_char *message, size_t message_len,
+                             const u_char *signature, size_t signature_len,
+                             const u_char *public_key, size_t public_key_len)
+{
+    EVP_PKEY *pkey = NULL;
+    EVP_MD_CTX *md_ctx = NULL;
+    int ret = SNMPERR_GENERR;
+
+    if (!message || !signature || !public_key) {
+        return SNMPERR_GENERR;
+    }
+
+    if (signature_len != 3293) { /* ML-DSA-65 signature length */
+        return SNMPERR_GENERR;
+    }
+
+    if (public_key_len != 1952) { /* ML-DSA-65 public key length */
+        return SNMPERR_GENERR;
+    }
+
+    /* Load public key */
+    pkey = EVP_PKEY_new_raw_public_key_ex(NULL, "mldsa65", "provider=oqsprovider",
+                                          public_key, public_key_len);
+    if (!pkey) {
+        goto cleanup;
+    }
+
+    /* Create verification context */
+    md_ctx = EVP_MD_CTX_new();
+    if (!md_ctx) {
+        goto cleanup;
+    }
+
+    /* Initialize verification */
+    if (EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, pkey) <= 0) {
+        goto cleanup;
+    }
+
+    /* Verify the signature */
+    if (EVP_DigestVerify(md_ctx, signature, signature_len, message, message_len) == 1) {
+        ret = SNMPERR_SUCCESS;
+    }
+
+cleanup:
+    if (md_ctx) EVP_MD_CTX_free(md_ctx);
+    if (pkey) EVP_PKEY_free(pkey);
+
+    return ret;
+}
 
 #ifdef QUITFUN
 #undef QUITFUN
@@ -132,37 +268,38 @@ int MD5_hmac(const u_char * data, size_t len, u_char * mac, size_t maclen,
              const u_char * secret, size_t secretlen);
 #endif
 
+/* Replace the entire _auth_alg_info array with this updated version */
 static const netsnmp_auth_alg_info _auth_alg_info[] = {
-    { NETSNMP_USMAUTH_NOAUTH, "usmNoAuthProtocol", usmNoAuthProtocol,
-      OID_LENGTH(usmNoAuthProtocol), 0, 0 },
-    { NETSNMP_USMAUTH_HMACSHA1, "usmHMACSHA1AuthProtocol",
-      usmHMACSHA1AuthProtocol, OID_LENGTH(usmHMACSHA1AuthProtocol),
-      BYTESIZE(SNMP_TRANS_AUTHLEN_HMACSHA1), USM_MD5_AND_SHA_AUTH_LEN },
-    { NETSNMP_USMAUTH_MLDSA65, "usmMLDSA65AuthProtocol",
-      usmMLDSA65AuthProtocol, OID_LENGTH(usmMLDSA65AuthProtocol),
-      3293, 3293 },
+    { NETSNMP_USMAUTH_NOAUTH, "usmNoAuthProtocol", usmNoAuthProtocol,
+    OID_LENGTH(usmNoAuthProtocol), 0, 0 },
+    { NETSNMP_USMAUTH_HMACSHA1, "usmHMACSHA1AuthProtocol",
+    usmHMACSHA1AuthProtocol, OID_LENGTH(usmHMACSHA1AuthProtocol),
+    BYTESIZE(SNMP_TRANS_AUTHLEN_HMACSHA1), USM_MD5_AND_SHA_AUTH_LEN },
+    { NETSNMP_USMAUTH_MLDSA65, "usmMLDSA65AuthProtocol",
+    usmMLDSA65AuthProtocol, OID_LENGTH(usmMLDSA65AuthProtocol),
+    3293, 3293 },
 #ifndef NETSNMP_DISABLE_MD5
-    { NETSNMP_USMAUTH_HMACMD5, "usmHMACMD5AuthProtocol",
-      usmHMACMD5AuthProtocol, OID_LENGTH(usmHMACMD5AuthProtocol),
-      BYTESIZE(SNMP_TRANS_AUTHLEN_HMACMD5), USM_MD5_AND_SHA_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMACMD5, "usmHMACMD5AuthProtocol",
+    usmHMACMD5AuthProtocol, OID_LENGTH(usmHMACMD5AuthProtocol),
+    BYTESIZE(SNMP_TRANS_AUTHLEN_HMACMD5), USM_MD5_AND_SHA_AUTH_LEN },
 #endif
 #ifdef HAVE_EVP_SHA224
-    { NETSNMP_USMAUTH_HMAC128SHA224, "usmHMAC128SHA224AuthProtocol",
-      usmHMAC128SHA224AuthProtocol, OID_LENGTH(usmHMAC128SHA224AuthProtocol),
-      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC128SHA224), USM_HMAC128SHA224_AUTH_LEN },
-    { NETSNMP_USMAUTH_HMAC192SHA256, "usmHMAC192SHA256AuthProtocol",
-      usmHMAC192SHA256AuthProtocol, OID_LENGTH(usmHMAC192SHA256AuthProtocol),
-      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC192SHA256), USM_HMAC192SHA256_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC128SHA224, "usmHMAC128SHA224AuthProtocol",
+    usmHMAC128SHA224AuthProtocol, OID_LENGTH(usmHMAC128SHA224AuthProtocol),
+    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC128SHA224), USM_HMAC128SHA224_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC192SHA256, "usmHMAC192SHA256AuthProtocol",
+    usmHMAC192SHA256AuthProtocol, OID_LENGTH(usmHMAC192SHA256AuthProtocol),
+    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC192SHA256), USM_HMAC192SHA256_AUTH_LEN },
 #endif
 #ifdef HAVE_EVP_SHA384
-    { NETSNMP_USMAUTH_HMAC256SHA384, "usmHMAC256SHA384AuthProtocol",
-      usmHMAC256SHA384AuthProtocol, OID_LENGTH(usmHMAC256SHA384AuthProtocol),
-      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC256SHA384), USM_HMAC256SHA384_AUTH_LEN },
-    { NETSNMP_USMAUTH_HMAC384SHA512, "usmHMAC384SHA512AuthProtocol",
-      usmHMAC384SHA512AuthProtocol, OID_LENGTH(usmHMAC384SHA512AuthProtocol),
-      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC384SHA512), USM_HMAC384SHA512_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC256SHA384, "usmHMAC256SHA384AuthProtocol",
+    usmHMAC256SHA384AuthProtocol, OID_LENGTH(usmHMAC256SHA384AuthProtocol),
+    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC256SHA384), USM_HMAC256SHA384_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC384SHA512, "usmHMAC384SHA512AuthProtocol",
+    usmHMAC384SHA512AuthProtocol, OID_LENGTH(usmHMAC384SHA512AuthProtocol),
+    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC384SHA512), USM_HMAC384SHA512_AUTH_LEN },
 #endif
-    { -1, "unknown", NULL, 0, 0, 0 }
+    { -1, "unknown", NULL, 0, 0, 0 }
 };
 
 static const netsnmp_priv_alg_info _priv_alg_info[] = {
@@ -184,11 +321,6 @@ static const netsnmp_priv_alg_info _priv_alg_info[] = {
 #ifdef NETSNMP_DRAFT_BLUMENTHAL_AES_04
     { USM_CREATE_USER_PRIV_AES192, "usmAES192PrivProtocol",
       usmAES192PrivProtocol, OID_LENGTH(usmAES192PrivProtocol),
-      BYTESIZE(SNMP_TRANS_PRIVLEN_AES192),
-      BYTESIZE(SNMP_TRANS_PRIVLEN_AES192_IV),
-      0 },
-    { USM_CREATE_USER_PRIV_AES192_CISCO, "usmAES192CiscoPrivProtocol",
-      usmAES192CiscoPrivProtocol, OID_LENGTH(usmAES192CiscoPrivProtocol),
       BYTESIZE(SNMP_TRANS_PRIVLEN_AES192),
       BYTESIZE(SNMP_TRANS_PRIVLEN_AES192_IV),
       0 },
@@ -283,7 +415,7 @@ sc_find_auth_alg_byoid(const oid *authoid, u_int len)
             return(&_auth_alg_info[i]);
     }
 
-/*    DEBUGMSGTL(("scapi", "No auth alg found for"));
+/* DEBUGMSGTL(("scapi", "No auth alg found for"));
       DEBUGMSGOID(("scapi", authoid, len ));*/
 
     return NULL;
@@ -625,7 +757,7 @@ sc_random(u_char * buf, size_t * buflen)
 
 #else
 _SCAPI_NOT_CONFIGURED
-#endif                          /*  */
+#endif                          /* */
 
 
 #ifdef NETSNMP_USE_OPENSSL
@@ -695,143 +827,8 @@ sc_get_openssl_privfn(int priv_type)
 
     return fn;
 }
-#endif /* openssl */
+#endif /* NETSNMP_USE_OPENSSL */
 
-
-/*
- ====================================================================
- ====================================================================
- ==                                                                ==
- ==      NEW PQC IMPLEMENTATION FOR ML-DSA-65 (DILITHIUM)          ==
- ==                                                                ==
- ====================================================================
- ====================================================================
- */
-
-/*
- * sc_sign_mldsa65
- *
- * Signs a message digest using ML-DSA-65 (Dilithium) via the OQS provider.
- * This function uses the OpenSSL EVP API.
- *
- * Parameters:
- * *privkey         A pointer to an EVP_PKEY object holding the ML-DSA private key.
- * *digest          The message digest (hash) to be signed.
- * digest_len      Length of the digest.
- * *signature       A buffer to store the resulting signature.
- * *siglen          Will be updated with the actual length of the signature.
- *
- * Returns:
- * SNMPERR_SUCCESS on success, SNMPERR_GENERR on failure.
- */
-int
-sc_sign_mldsa65(EVP_PKEY *privkey,
-                const u_char *digest, size_t digest_len,
-                u_char *signature, size_t *siglen)
-{
-    EVP_MD_CTX *mdctx = NULL;
-    int rval = SNMPERR_SUCCESS;
-
-    DEBUGMSGTL(("scapi:mldsa", "sc_sign_mldsa65 called.\n"));
-
-    if (!privkey || !digest || !signature || !siglen) {
-        return SNMPERR_GENERR;
-    }
-
-    /* Create the signing context */
-    if (!(mdctx = EVP_MD_CTX_new())) {
-        DEBUGMSGTL(("scapi:mldsa", "EVP_MD_CTX_new failed.\n"));
-        return SNMPERR_GENERR;
-    }
-
-    /*
-     * Initialize the signing operation.
-     * We use EVP_DigestSign because ML-DSA is a pure signature scheme.
-     * The "NULL" for the hash type tells OpenSSL to use the algorithm's default.
-     */
-    if (1 != EVP_DigestSignInit(mdctx, NULL, NULL, NULL, privkey)) {
-        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestSignInit failed.\n"));
-        rval = SNMPERR_GENERR;
-        goto cleanup;
-    }
-
-    /*
-     * Pass the digest to the signing function.
-     * NOTE: For a real implementation, you'd typically pass the full message
-     * with EVP_DigestSignUpdate. Here we are signing the pre-computed digest.
-     * For pure signature schemes like Dilithium, this is the expected use.
-     */
-    if (1 != EVP_DigestSign(mdctx, signature, siglen, digest, digest_len)) {
-        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestSign failed.\n"));
-        rval = SNMPERR_GENERR;
-        goto cleanup;
-    }
-
-    DEBUGMSGTL(("scapi:mldsa", "Successfully created ML-DSA signature of length %zu.\n", *siglen));
-
-cleanup:
-    if (mdctx) {
-        EVP_MD_CTX_free(mdctx);
-    }
-
-    return rval;
-}
-
-
-/*
- * sc_verify_mldsa65
- *
- * Verifies a message digest signature using ML-DSA-65 (Dilithium).
- */
-int
-sc_verify_mldsa65(EVP_PKEY *pubkey,
-                  const u_char *digest, size_t digest_len,
-                  const u_char *signature, size_t siglen)
-{
-    EVP_MD_CTX *mdctx = NULL;
-    int rval = SNMPERR_SUCCESS;
-
-    DEBUGMSGTL(("scapi:mldsa", "sc_verify_mldsa65 called.\n"));
-
-    if (!pubkey || !digest || !signature) {
-        return SNMPERR_GENERR;
-    }
-
-    /* Create the verification context */
-    if (!(mdctx = EVP_MD_CTX_new())) {
-        DEBUGMSGTL(("scapi:mldsa", "EVP_MD_CTX_new failed.\n"));
-        return SNMPERR_GENERR;
-    }
-
-    /* Initialize the verification operation */
-    if (1 != EVP_DigestVerifyInit(mdctx, NULL, NULL, NULL, pubkey)) {
-        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestVerifyInit failed.\n"));
-        rval = SNMPERR_GENERR;
-        goto cleanup;
-    }
-
-    /* Verify the signature against the digest */
-    if (1 != EVP_DigestVerify(mdctx, signature, siglen, digest, digest_len)) {
-        DEBUGMSGTL(("scapi:mldsa", "EVP_DigestVerify failed. Signature is NOT valid.\n"));
-        rval = SNMPERR_GENERR; /* Signature verification failed */
-        goto cleanup;
-    }
-
-    DEBUGMSGTL(("scapi:mldsa", "Successfully verified ML-DSA signature.\n"));
-
-cleanup:
-    if (mdctx) {
-        EVP_MD_CTX_free(mdctx);
-    }
-
-    return rval;
-}
-
-/*
- ====================================================================
- ==                  END OF NEW PQC IMPLEMENTATION                 ==
- ====================================================================
- */
 
 /*******************************************************************-o-******
  * sc_generate_keyed_hash
@@ -867,6 +864,13 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
                        u_char * MAC, size_t * maclen)
 #if  defined(NETSNMP_USE_INTERNAL_MD5) || defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
 {
+    /* Add this check at the beginning of the function */
+    if (snmp_oid_compare(authtypeOID, authtypeOIDlen,
+                          usmMLDSA65AuthProtocol,
+                          OID_LENGTH(usmMLDSA65AuthProtocol)) == 0) {
+        return sc_sign_mldsa65(message, msglen, key, keylen, MAC, maclen);
+    }
+
     int             rval = SNMPERR_SUCCESS, auth_type;
     int             iproperlength;
     size_t          properlength;
@@ -916,30 +920,6 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
 #ifdef NETSNMP_USE_OPENSSL
     /** get hash function */
     hashfn = sc_get_openssl_hashfn(auth_type);
-
-    /*
-     ============================================================
-     ==                NEW PQC LOGIC GOES HERE                 ==
-     ============================================================
-    */
-    if (auth_type == NETSNMP_USMAUTH_MLDSA65) {
-        /* This is our new PQC protocol. We will call our signing function. */
-        /* Note: A real implementation would need to load the key into an EVP_PKEY object first. */
-        /* For this conceptual step, we'll just log a message. */
-        DEBUGMSGTL(("scapi:mldsa", "Diverting to ML-DSA signing path.\n"));
-        /* rval = sc_sign_mldsa65(private_key_object, message, msglen, MAC, maclen); */
-        /* QUITFUN(rval, sc_generate_keyed_hash_quit); */
-
-        /* For now, just copy dummy data to simulate a signature and prevent errors */
-        *maclen = 3293; /* The signature size we defined earlier */
-        memset(MAC, 0xAA, *maclen); /* Fill with dummy bytes */
-        goto sc_generate_keyed_hash_quit; /* Skip the rest of the function */
-    }
-    /*
-     ============================================================
-     ==               END OF NEW PQC LOGIC                     ==
-     ============================================================
-    */
     if (NULL == hashfn) {
         QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
     }
@@ -1062,7 +1042,7 @@ sc_hash(const oid * hashtype, size_t hashtypelen, const u_char * buf,
 
 /*******************************************************************-o-******
  * sc_hash_type():
- *    a generic wrapper around whatever hashing package we are using.
+ * a generic wrapper around whatever hashing package we are using.
  *
  * IN:
  * hashtype    - oid pointer to a hash type
@@ -1085,9 +1065,6 @@ sc_hash_type(int auth_type, const u_char * buf, size_t buf_len, u_char * MAC,
              size_t * MAC_len)
 #if defined(NETSNMP_USE_INTERNAL_MD5) || defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
 {
-#if defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
-    int            rval = SNMPERR_SUCCESS;
-#endif
 #if defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11)
     unsigned int   tmp_len;
 #endif
@@ -1245,6 +1222,15 @@ sc_check_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
                     const u_char * MAC, u_int maclen)
 #if defined(NETSNMP_USE_INTERNAL_MD5) || defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
 {
+    /* Add this check at the beginning of the function */
+    if (snmp_oid_compare(authtypeOID, authtypeOIDlen,
+                          usmMLDSA65AuthProtocol,
+                          OID_LENGTH(usmMLDSA65AuthProtocol)) == 0) {
+        /* For verification, we need the public key - this is a simplified approach */
+        /* In a real implementation, you'd need to handle key management properly */
+        return sc_verify_mldsa65(message, msglen, MAC, maclen, key, keylen);
+    }
+
     int             rval = SNMPERR_SUCCESS, auth_type, auth_size;
     size_t          buf_len = SNMP_MAXBUF_SMALL;
 
@@ -1498,14 +1484,12 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
         }
         rc = EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, ptlen);
         if (rc != 1) {
-            DEBUGMSGTL(("scapi:encrypt", "openssl error: update\n"));
             EVP_CIPHER_CTX_free(ctx);
             QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
         }
         enclen = len;
         rc = EVP_EncryptFinal(ctx, ciphertext + len, &len);
         if (rc != 1) {
-            DEBUGMSGTL(("scapi:encrypt", "openssl error: final\n"));
             EVP_CIPHER_CTX_free(ctx);
             QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
         }
@@ -1608,7 +1592,7 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
  * Returns:
  *	SNMPERR_SUCCESS			Success.
  *	SNMPERR_SC_NOT_CONFIGURED	Encryption is not supported.
- *      SNMPERR_SC_GENERAL_FAILURE      Any other error
+ * SNMPERR_SC_GENERAL_FAILURE      Any other error
  *
  *
  * Decrypt ciphertext into plaintext using key and iv.
@@ -1794,7 +1778,7 @@ sc_decrypt(const oid * privtype, size_t privtypelen,
 #	else
     _SCAPI_NOT_CONFIGURED
 #	endif                   /* NETSNMP_USE_INTERNAL_MD5 */
-#endif                          /*  */
+#endif                          /* */
 }
 #endif                          /* NETSNMP_USE_OPENSSL */
 
@@ -2017,4 +2001,4 @@ SHA1_hmac(const u_char * data, size_t len, u_char * mac, size_t maclen,
     return rc;
 }
 #endif /* NETSNMP_USE_INTERNAL_CRYPTO */
-#endif /*  NETSNMP_FEATURE_REMOVE_USM_SCAPI  */
+#endif

@@ -25,9 +25,10 @@ extern          "C" {
 #define NETSNMP_USMAUTH_HMAC192SHA256     5 /* RFC 7860; MUST */
 #define NETSNMP_USMAUTH_HMAC256SHA384     6 /* RFC 7860; OPTIONAL */
 #define NETSNMP_USMAUTH_HMAC384SHA512     7 /* RFC 7860; SHOULD */
-#define NETSNMP_USMAUTH_MLDSA65           8 /* EXPERIMENTAL */
+#define NETSNMP_USMAUTH_MLDSA65           8 /* EXPERIMENTAL PQC */
 
 NETSNMP_IMPORT const oid usmNoAuthProtocol[10];
+
 #ifndef NETSNMP_DISABLE_MD5
 NETSNMP_IMPORT const oid usmHMACMD5AuthProtocol[10];
 #endif
@@ -38,6 +39,7 @@ NETSNMP_IMPORT const oid usmHMAC128SHA224AuthProtocol[10];
 NETSNMP_IMPORT const oid usmHMAC192SHA256AuthProtocol[10];
 NETSNMP_IMPORT const oid usmHMAC256SHA384AuthProtocol[10];
 NETSNMP_IMPORT const oid usmHMAC384SHA512AuthProtocol[10];
+NETSNMP_IMPORT const oid usmMLDSA65AuthProtocol[];
 
 /** priv */
 NETSNMP_IMPORT const oid usmNoPrivProtocol[10];
@@ -71,6 +73,9 @@ NETSNMP_IMPORT const oid usmAES256CiscoPrivProtocol[11];
 NETSNMP_IMPORT const oid usmAES192Cisco2PrivProtocol[11];
 NETSNMP_IMPORT const oid usmAES256Cisco2PrivProtocol[11];
 #endif /* NETSNMP_DRAFT_BLUMENTHAL_AES_04 */
+
+/* PQC Priv */
+#define NETSNMP_USMPRIV_MLDSA65_AES       8 /* EXPERIMENTAL PQC + AES */
 
 #ifdef __cplusplus
 }

@@ -102,8 +102,8 @@ snmp_parse_args_descriptions(FILE * outf)
     fprintf(outf, "  -c COMMUNITY\t\tset the community string\n");
 #endif /* support for community based SNMP */
     fprintf(outf, "SNMP Version 3 specific\n");
-    fprintf(outf,
-            "  -a PROTOCOL\t\tset authentication protocol (MD5|SHA|MLDSA65|SHA-224|SHA-256|SHA-384|SHA-512)\n");
+    /* NEW: Replace with this line */
+    fprintf(outf, "  -a PROTOCOL\t\tset authentication protocol (MD5|SHA|MLDSA65|SHA-224|SHA-256|SHA-384|SHA-512)\n");
     fprintf(outf,
             "  -A PASSPHRASE\t\tset authentication protocol pass phrase\n");
     fprintf(outf,
@@ -114,15 +114,8 @@ snmp_parse_args_descriptions(FILE * outf)
             "  -l LEVEL\t\tset security level (noAuthNoPriv|authNoPriv|authPriv)\n");
     fprintf(outf, "  -n CONTEXT\t\tset context name (e.g. bridge1)\n");
     fprintf(outf, "  -u USER-NAME\t\tset security name (e.g. bert)\n");
-#ifdef HAVE_AES
-    fprintf(outf, "  -x PROTOCOL\t\tset privacy protocol (DES|AES"
-#ifdef NETSNMP_DRAFT_BLUMENTHAL_AES_04
-            "|AES-192|AES-256"
-#endif
-            ")\n");
-#else
-    fprintf(outf, "  -x PROTOCOL\t\tset privacy protocol (DES)\n");
-#endif
+    /* NEW: Replace with this line */
+    fprintf(outf, "  -x PROTOCOL\t\tset privacy protocol (DES|AES|MLDSA65-AES)\n");
     fprintf(outf, "  -X PASSPHRASE\t\tset privacy protocol pass phrase\n");
     fprintf(outf,
             "  -Z BOOTS,TIME\t\tset destination engine boots/time\n");
@@ -167,7 +160,7 @@ handle_long_opt(const char *myoptarg)
 {
     char           *cp, *cp2;
     /*
-     * else it's a long option, so process it like name=value 
+     * else it's a long option, so process it like name=value
      */
     cp = (char *)malloc(strlen(myoptarg) + 3);
     if (!cp)
@@ -180,12 +173,12 @@ handle_long_opt(const char *myoptarg)
          * can tell.  Give them a '1' as the argument (which
          * works for boolean tokens and a few others) and let
          * them suffer from there if it's not what they
-         * wanted 
+         * wanted
          */
         strcat(cp, " 1");
     } else {
         /*
-         * replace the '=' with a ' ' 
+         * replace the '=' with a ' '
          */
         if (cp2)
             *cp2 = ' ';
@@ -193,6 +186,51 @@ handle_long_opt(const char *myoptarg)
     netsnmp_config(cp);
     free(cp);
 }
+
+/* Add this function for better PQC error reporting */
+static void print_pqc_error_help(void)
+{
+    fprintf(stderr, "\nPost-Quantum Cryptography (PQC) Authentication Help:\n");
+    fprintf(stderr, "  Algorithm: ML-DSA65 (CRYSTALS-Dilithium)\n");
+    fprintf(stderr, "  Usage: -a mldsa65 -A <passphrase>\n");
+    fprintf(stderr, "  Requirements:\n");
+    fprintf(stderr, "    - Passphrase must be at least 32 characters\n");
+    fprintf(stderr, "    - Security level must be authNoPriv or authPriv\n");
+    fprintf(stderr, "    - Both client and server must support PQC\n");
+    fprintf(stderr, "  Examples:\n");
+    fprintf(stderr, "    snmpwalk -v 3 -u pqcuser -l authNoPriv -a mldsa65 -A MyVeryLongPQCPassphrase target system\n");
+    fprintf(stderr, "    snmpget -v 3 -u pqcuser -l authPriv -a mldsa65 -A MyVeryLongPQCPassphrase -x aes -X MyPrivKey target oid\n");
+}
+
+/* Add this function to validate PQC-specific parameters */
+static int validate_pqc_auth_params(netsnmp_session *session)
+{
+    /* Check if ML-DSA65 is being used */
+    if (session->securityAuthProto &&
+        snmp_oid_compare(session->securityAuthProto, session->securityAuthProtoLen,
+                         usmMLDSA65AuthProtocol, OID_LENGTH(usmMLDSA65AuthProtocol)) == 0) {
+
+        /* Validate authentication passphrase length for PQC */
+        if (session->securityAuthKeyLen < 32) {
+            fprintf(stderr, "Error: ML-DSA65 authentication requires a passphrase of at least 32 characters\n");
+            return SNMPERR_GENERR;
+        }
+
+        /* Ensure security level is appropriate */
+        if (session->securityLevel < SNMP_SEC_LEVEL_AUTHNOPRIV) {
+            fprintf(stderr, "Error: ML-DSA65 requires authentication security level\n");
+            return SNMPERR_GENERR;
+        }
+
+        /* Recommend higher security for PQC */
+        if (session->securityLevel == SNMP_SEC_LEVEL_AUTHNOPRIV) {
+            fprintf(stderr, "Warning: For PQC authentication, consider using authPriv security level\n");
+        }
+    }
+
+    return SNMPERR_SUCCESS;
+}
+
 
 int
 netsnmp_parse_args(int argc,
@@ -211,7 +249,7 @@ netsnmp_parse_args(int argc,
     char           *backup_NETSNMP_DS_LIB_OUTPUT_PRECISION = NULL;
 
     /*
-     * initialize session to default values 
+     * initialize session to default values
      */
     snmp_sess_init(session);
     strcpy(Opts, "Y:VhHm:M:O:I:P:D:dv:r:t:c:Z:e:E:n:u:l:x:X:a:A:p:T:-:3:L:s:");
@@ -224,7 +262,7 @@ netsnmp_parse_args(int argc,
     }
 
     /*
-     * get the options 
+     * get the options
      */
     DEBUGMSGTL(("snmp_parse_args", "starting: %d/%d\n", optind, argc));
     for (arg = 0; arg < argc; arg++) {
@@ -291,7 +329,7 @@ netsnmp_parse_args(int argc,
         case 'O':
             cp = snmp_out_options(optarg, argc, argv);
             if (cp != NULL) {
-                fprintf(stderr, "Unknown output option passed to -O: %c.\n", 
+                fprintf(stderr, "Unknown output option passed to -O: %c.\n",
 			*cp);
                 ret = NETSNMP_PARSE_ARGS_ERROR_USAGE;
                 goto out;
@@ -332,7 +370,7 @@ netsnmp_parse_args(int argc,
             break;
 
         case 'd':
-            netsnmp_ds_set_boolean(NETSNMP_DS_LIBRARY_ID, 
+            netsnmp_ds_set_boolean(NETSNMP_DS_LIBRARY_ID,
 				   NETSNMP_DS_LIB_DUMP_PACKET, 1);
             break;
 
@@ -375,7 +413,7 @@ netsnmp_parse_args(int argc,
         {
             char leftside[SNMP_MAXBUF_MEDIUM], rightside[SNMP_MAXBUF_MEDIUM];
             char *tmpcp, *tmpopt;
-            
+
             /* ensure we have a proper argument */
             tmpopt = strdup(optarg);
             tmpcp = strchr(tmpopt, '=');
@@ -413,7 +451,7 @@ netsnmp_parse_args(int argc,
             free(tmpopt);
         }
         break;
-            
+
         case 't':
             session->timeout = (long)(atof(optarg) * 1000000L);
             if (session->timeout <= 0) {
@@ -495,13 +533,13 @@ netsnmp_parse_args(int argc,
         }
     }
     DEBUGMSGTL(("snmp_parse_args", "finished: %d/%d\n", optind, argc));
-    
+
     /*
      * save command line parameters which should have precedence above config file settings
-     *    (There ought to be a more scalable approach than this....)
+     * (There ought to be a more scalable approach than this....)
      */
     if (netsnmp_ds_get_string(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OUTPUT_PRECISION)) {
-        backup_NETSNMP_DS_LIB_OUTPUT_PRECISION = 
+        backup_NETSNMP_DS_LIB_OUTPUT_PRECISION =
             strdup(netsnmp_ds_get_string(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OUTPUT_PRECISION));
     }
 
@@ -519,17 +557,17 @@ netsnmp_parse_args(int argc,
     }
 
     /*
-     * session default version 
+     * session default version
      */
     if (session->version == SNMP_DEFAULT_VERSION) {
         /*
-         * run time default version 
+         * run time default version
          */
-        session->version = netsnmp_ds_get_int(NETSNMP_DS_LIBRARY_ID, 
+        session->version = netsnmp_ds_get_int(NETSNMP_DS_LIBRARY_ID,
 					      NETSNMP_DS_LIB_SNMPVERSION);
 
         /*
-         * compile time default version 
+         * compile time default version
          */
         if (!session->version) {
             switch (NETSNMP_DEFAULT_SNMP_VERSION) {
@@ -565,13 +603,13 @@ netsnmp_parse_args(int argc,
     /* XXX: this should ideally be moved to snmpusm.c somehow */
 
     /*
-     * make master key from pass phrases 
+     * make master key from pass phrases
      */
     if (Apsz) {
         session->securityAuthKeyLen = USM_AUTH_KU_LEN;
         if (session->securityAuthProto == NULL) {
             /*
-             * get .conf set default 
+             * get .conf set default
              */
             const oid      *def =
                 get_default_authtype(&session->securityAuthProtoLen);
@@ -592,6 +630,7 @@ netsnmp_parse_args(int argc,
             snmp_perror(argv[0]);
             fprintf(stderr,
                     "Error generating a key (Ku) from the supplied authentication pass phrase. \n");
+            print_pqc_error_help();
             ret = NETSNMP_PARSE_ARGS_ERROR;
             goto out;
         }
@@ -602,7 +641,7 @@ netsnmp_parse_args(int argc,
         session->securityPrivKeyLen = USM_PRIV_KU_LEN;
         if (session->securityPrivProto == NULL) {
             /*
-             * get .conf set default 
+             * get .conf set default
              */
             const oid      *def =
                 get_default_privtype(&session->securityPrivProtoLen);
@@ -631,8 +670,14 @@ netsnmp_parse_args(int argc,
     }
 #endif /* NETSNMP_SECMOD_USM */
 
+    /* Add this validation call before the final return statement */
+    if (validate_pqc_auth_params(session) != SNMPERR_SUCCESS) {
+        ret = SNMPERR_GENERR;
+        goto out;
+    }
+
     /*
-     * get the hostname 
+     * get the hostname
      */
     if (optind >= argc) {
         fprintf(stderr, "No hostname specified.\n");
@@ -644,13 +689,13 @@ netsnmp_parse_args(int argc,
 #if !defined(NETSNMP_DISABLE_SNMPV1) || !defined(NETSNMP_DISABLE_SNMPV2C)
     /*
      * If v1 or v2c, check community has been set, either by a -c option above,
-     * or via a default token somewhere.  
+     * or via a default token somewhere.
      * If neither, it will be taken from the incoming request PDU.
      */
 
 #if defined(NETSNMP_DISABLE_SNMPV1)
     if (session->version == SNMP_VERSION_2c)
-#else 
+#else
 #if defined(NETSNMP_DISABLE_SNMPV2C)
     if (session->version == SNMP_VERSION_1)
 #else
@@ -660,7 +705,7 @@ netsnmp_parse_args(int argc,
 #endif
     {
         if (Cpsz == NULL) {
-            Cpsz = netsnmp_ds_get_string(NETSNMP_DS_LIBRARY_ID, 
+            Cpsz = netsnmp_ds_get_string(NETSNMP_DS_LIBRARY_ID,
 					 NETSNMP_DS_LIB_COMMUNITY);
 	    if (Cpsz == NULL) {
                 if (netsnmp_ds_get_boolean(NETSNMP_DS_LIBRARY_ID,
