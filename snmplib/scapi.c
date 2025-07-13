@@ -21,7 +21,7 @@
 
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-features.h>
-const oid usmMLDSA65AuthProtocol[]   = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /* EXPERIMENTAL OID FOR MLDSA65 */
+
 #ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
 #endif
@@ -74,7 +74,7 @@ netsnmp_feature_child_of(usm_scapi, usm_support);
 #include <net-snmp/library/scapi.h>
 #include <net-snmp/library/mib.h>
 #include <net-snmp/library/transform_oids.h>
-
+const oid usmMLDSA65AuthProtocol[]   = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /* EXPERIMENTAL OID FOR MLDSA65 */
 #ifdef NETSNMP_USE_INTERNAL_CRYPTO
 #include <net-snmp/library/openssl_md5.h>
 #include <net-snmp/library/openssl_sha.h>

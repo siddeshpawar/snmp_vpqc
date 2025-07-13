@@ -28,7 +28,6 @@ extern          "C" {
 #define NETSNMP_USMAUTH_MLDSA65           8 /* EXPERIMENTAL */
 
 NETSNMP_IMPORT const oid usmNoAuthProtocol[10];
-NETSNMP_IMPORT const oid usmMLDSA65AuthProtocol[];
 #ifndef NETSNMP_DISABLE_MD5
 NETSNMP_IMPORT const oid usmHMACMD5AuthProtocol[10];
 #endif
