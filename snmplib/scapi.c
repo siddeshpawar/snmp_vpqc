@@ -716,13 +716,15 @@ sc_get_openssl_privfn(int priv_type)
  *
  * ASSUMED that the number of hash bits is a multiple of 8.
  */
+
 int
 sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
                        const u_char * key, u_int keylen,
                        const u_char * message, u_int msglen,
                        u_char * MAC, size_t * maclen)
 #if  defined(NETSNMP_USE_INTERNAL_MD5) || defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
-{
+{   EVP_PKEY *pkey = NULL;
+    EVP_MD_CTX *mdctx = NULL;
     int             rval = SNMPERR_SUCCESS, auth_type;
     int             iproperlength;
     size_t          properlength;
@@ -822,7 +824,6 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
 #elif defined(NETSNMP_USE_INTERNAL_CRYPTO)
     /* ... other internal crypto logic ... */
 #endif
-
   sc_generate_keyed_hash_quit:
     memset(buf, 0, SNMP_MAXBUF_SMALL);
     return rval;
@@ -1056,6 +1057,8 @@ sc_check_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
     int             rval = SNMPERR_SUCCESS, auth_type, auth_size;
     size_t          buf_len = SNMP_MAXBUF_SMALL;
     u_char          buf[SNMP_MAXBUF_SMALL];
+    EVP_MD_CTX *mdctx = NULL;
+    EVP_PKEY *pkey = NULL;
 
     DEBUGTRACE;
 
@@ -1073,8 +1076,7 @@ sc_check_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
     /* START OF NEW PQC/ML-DSA LOGIC                                  */
     /******************************************************************/
     if (auth_type == NETSNMP_USMAUTH_MLDSA65) {
-        EVP_MD_CTX *mdctx = NULL;
-        EVP_PKEY *pkey = NULL;
+
 
         /* 1. Create a PKEY object from the raw public key */
         /* THIS IS THE CORRECTED LINE */
