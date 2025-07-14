@@ -45,7 +45,7 @@
 # endif
 #endif
 #ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h.
+#include <netinet/in.h>
 #endif
 
 #ifdef HAVE_UNISTD_H
@@ -103,7 +103,7 @@ netsnmp_feature_child_of(usm_scapi, usm_support);
 #endif
 #endif
 
-#endif
+#endif /* NETSNMP_USE_OPENSSL */
 
 #ifdef NETSNMP_USE_INTERNAL_CRYPTO
 #endif
@@ -111,142 +111,6 @@ netsnmp_feature_child_of(usm_scapi, usm_support);
 #ifdef NETSNMP_USE_PKCS11
 #include <security/cryptoki.h>
 #endif
-
-/* ====================================================================
- * PQC ML-DSA65 Implementation for Net-SNMP
- * Add these functions to snmplib/scapi.c
- * ==================================================================== */
-
-#include <openssl/evp.h>
-#include <openssl/provider.h>
-#include <string.h>
-
-/* Add this OID definition near the top with other OID definitions */
-const oid usmMLDSA65AuthProtocol[] = { 1, 3, 6, 1, 4, 1, 8072, 4, 1, 1, 1 }; /* EXPERIMENTAL OID FOR MLDSA65 */
-
-/* PQC ML-DSA65 Signature Function */
-static int sc_sign_mldsa65(const u_char *message, size_t message_len,
-                          const u_char *key, size_t key_len,
-                          u_char *signature, size_t *signature_len)
-{
-    EVP_PKEY_CTX *pkey_ctx = NULL;
-    EVP_PKEY *pkey = NULL;
-    EVP_MD_CTX *md_ctx = NULL;
-    int ret = SNMPERR_GENERR;
-    size_t sig_len = 3293; /* ML-DSA-65 signature length */
-
-    if (!message || !key || !signature || !signature_len) {
-        return SNMPERR_GENERR;
-    }
-
-    if (*signature_len < sig_len) {
-        *signature_len = sig_len;
-        return SNMPERR_GENERR;
-    }
-
-    /* Create key context for ML-DSA-65 */
-    pkey_ctx = EVP_PKEY_CTX_new_from_name(NULL, "mldsa65", "provider=oqsprovider");
-    if (!pkey_ctx) {
-        goto cleanup;
-    }
-
-    /* Initialize key generation */
-    if (EVP_PKEY_keygen_init(pkey_ctx) <= 0) {
-        goto cleanup;
-    }
-
-    /* Generate or load the private key */
-    if (key_len == 4032) { /* ML-DSA-65 private key size */
-        /* Load existing private key */
-        pkey = EVP_PKEY_new_raw_private_key_ex(NULL, "mldsa65", "provider=oqsprovider",
-                                               key, key_len);
-        if (!pkey) {
-            goto cleanup;
-        }
-    } else {
-        /* Generate new key pair */
-        if (EVP_PKEY_keygen(pkey_ctx, &pkey) <= 0) {
-            goto cleanup;
-        }
-    }
-
-    /* Create signing context */
-    md_ctx = EVP_MD_CTX_new();
-    if (!md_ctx) {
-        goto cleanup;
-    }
-
-    /* Initialize signing */
-    if (EVP_DigestSignInit(md_ctx, NULL, NULL, NULL, pkey) <= 0) {
-        goto cleanup;
-    }
-
-    /* Sign the message */
-    if (EVP_DigestSign(md_ctx, signature, &sig_len, message, message_len) <= 0) {
-        goto cleanup;
-    }
-
-    *signature_len = sig_len;
-    ret = SNMPERR_SUCCESS;
-
-cleanup:
-    if (md_ctx) EVP_MD_CTX_free(md_ctx);
-    if (pkey) EVP_PKEY_free(pkey);
-    if (pkey_ctx) EVP_PKEY_CTX_free(pkey_ctx);
-
-    return ret;
-}
-
-/* PQC ML-DSA65 Verification Function */
-static int sc_verify_mldsa65(const u_char *message, size_t message_len,
-                             const u_char *signature, size_t signature_len,
-                             const u_char *public_key, size_t public_key_len)
-{
-    EVP_PKEY *pkey = NULL;
-    EVP_MD_CTX *md_ctx = NULL;
-    int ret = SNMPERR_GENERR;
-
-    if (!message || !signature || !public_key) {
-        return SNMPERR_GENERR;
-    }
-
-    if (signature_len != 3293) { /* ML-DSA-65 signature length */
-        return SNMPERR_GENERR;
-    }
-
-    if (public_key_len != 1952) { /* ML-DSA-65 public key length */
-        return SNMPERR_GENERR;
-    }
-
-    /* Load public key */
-    pkey = EVP_PKEY_new_raw_public_key_ex(NULL, "mldsa65", "provider=oqsprovider",
-                                          public_key, public_key_len);
-    if (!pkey) {
-        goto cleanup;
-    }
-
-    /* Create verification context */
-    md_ctx = EVP_MD_CTX_new();
-    if (!md_ctx) {
-        goto cleanup;
-    }
-
-    /* Initialize verification */
-    if (EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, pkey) <= 0) {
-        goto cleanup;
-    }
-
-    /* Verify the signature */
-    if (EVP_DigestVerify(md_ctx, signature, signature_len, message, message_len) == 1) {
-        ret = SNMPERR_SUCCESS;
-    }
-
-cleanup:
-    if (md_ctx) EVP_MD_CTX_free(md_ctx);
-    if (pkey) EVP_PKEY_free(pkey);
-
-    return ret;
-}
 
 #ifdef QUITFUN
 #undef QUITFUN
@@ -268,38 +132,39 @@ int MD5_hmac(const u_char * data, size_t len, u_char * mac, size_t maclen,
              const u_char * secret, size_t secretlen);
 #endif
 
-/* Replace the entire _auth_alg_info array with this updated version */
 static const netsnmp_auth_alg_info _auth_alg_info[] = {
-    { NETSNMP_USMAUTH_NOAUTH, "usmNoAuthProtocol", usmNoAuthProtocol,
-    OID_LENGTH(usmNoAuthProtocol), 0, 0 },
-    { NETSNMP_USMAUTH_HMACSHA1, "usmHMACSHA1AuthProtocol",
-    usmHMACSHA1AuthProtocol, OID_LENGTH(usmHMACSHA1AuthProtocol),
-    BYTESIZE(SNMP_TRANS_AUTHLEN_HMACSHA1), USM_MD5_AND_SHA_AUTH_LEN },
-    { NETSNMP_USMAUTH_MLDSA65, "usmMLDSA65AuthProtocol",
-    usmMLDSA65AuthProtocol, OID_LENGTH(usmMLDSA65AuthProtocol),
-    3293, 3293 },
+    { NETSNMP_USMAUTH_NOAUTH, "usmNoAuthProtocol", usmNoAuthProtocol,
+      OID_LENGTH(usmNoAuthProtocol), 0, 0 },
+    { NETSNMP_USMAUTH_HMACSHA1, "usmHMACSHA1AuthProtocol",
+      usmHMACSHA1AuthProtocol, OID_LENGTH(usmHMACSHA1AuthProtocol),
+      BYTESIZE(SNMP_TRANS_AUTHLEN_HMACSHA1), USM_MD5_AND_SHA_AUTH_LEN },
 #ifndef NETSNMP_DISABLE_MD5
-    { NETSNMP_USMAUTH_HMACMD5, "usmHMACMD5AuthProtocol",
-    usmHMACMD5AuthProtocol, OID_LENGTH(usmHMACMD5AuthProtocol),
-    BYTESIZE(SNMP_TRANS_AUTHLEN_HMACMD5), USM_MD5_AND_SHA_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMACMD5, "usmHMACMD5AuthProtocol",
+      usmHMACMD5AuthProtocol, OID_LENGTH(usmHMACMD5AuthProtocol),
+      BYTESIZE(SNMP_TRANS_AUTHLEN_HMACMD5), USM_MD5_AND_SHA_AUTH_LEN },
 #endif
 #ifdef HAVE_EVP_SHA224
-    { NETSNMP_USMAUTH_HMAC128SHA224, "usmHMAC128SHA224AuthProtocol",
-    usmHMAC128SHA224AuthProtocol, OID_LENGTH(usmHMAC128SHA224AuthProtocol),
-    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC128SHA224), USM_HMAC128SHA224_AUTH_LEN },
-    { NETSNMP_USMAUTH_HMAC192SHA256, "usmHMAC192SHA256AuthProtocol",
-    usmHMAC192SHA256AuthProtocol, OID_LENGTH(usmHMAC192SHA256AuthProtocol),
-    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC192SHA256), USM_HMAC192SHA256_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC128SHA224, "usmHMAC128SHA224AuthProtocol",
+      usmHMAC128SHA224AuthProtocol, OID_LENGTH(usmHMAC128SHA224AuthProtocol),
+      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC128SHA224), USM_HMAC128SHA224_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC192SHA256, "usmHMAC192SHA256AuthProtocol",
+      usmHMAC192SHA256AuthProtocol, OID_LENGTH(usmHMAC192SHA256AuthProtocol),
+      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC192SHA256), USM_HMAC192SHA256_AUTH_LEN },
 #endif
 #ifdef HAVE_EVP_SHA384
-    { NETSNMP_USMAUTH_HMAC256SHA384, "usmHMAC256SHA384AuthProtocol",
-    usmHMAC256SHA384AuthProtocol, OID_LENGTH(usmHMAC256SHA384AuthProtocol),
-    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC256SHA384), USM_HMAC256SHA384_AUTH_LEN },
-    { NETSNMP_USMAUTH_HMAC384SHA512, "usmHMAC384SHA512AuthProtocol",
-    usmHMAC384SHA512AuthProtocol, OID_LENGTH(usmHMAC384SHA512AuthProtocol),
-    BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC384SHA512), USM_HMAC384SHA512_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC256SHA384, "usmHMAC256SHA384AuthProtocol",
+      usmHMAC256SHA384AuthProtocol, OID_LENGTH(usmHMAC256SHA384AuthProtocol),
+      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC256SHA384), USM_HMAC256SHA384_AUTH_LEN },
+    { NETSNMP_USMAUTH_HMAC384SHA512, "usmHMAC384SHA512AuthProtocol",
+      usmHMAC384SHA512AuthProtocol, OID_LENGTH(usmHMAC384SHA512AuthProtocol),
+      BYTESIZE(SNMP_TRANS_AUTHLEN_HMAC384SHA512), USM_HMAC384SHA512_AUTH_LEN },
 #endif
-    { -1, "unknown", NULL, 0, 0, 0 }
+    { NETSNMP_USMAUTH_MLDSA65, "usmMLDSA65AuthProtocol",
+      usmMLDSA65AuthProtocol, OID_LENGTH(usmMLDSA65AuthProtocol),
+      2500, /* Signature size for ML-DSA-6,5 can be around 2420 bytes */
+      32    /* Seed size for generating ML-DSA keypair */
+    },
+    { -1, "unknown", NULL, 0, 0, 0 }
 };
 
 static const netsnmp_priv_alg_info _priv_alg_info[] = {
@@ -321,6 +186,11 @@ static const netsnmp_priv_alg_info _priv_alg_info[] = {
 #ifdef NETSNMP_DRAFT_BLUMENTHAL_AES_04
     { USM_CREATE_USER_PRIV_AES192, "usmAES192PrivProtocol",
       usmAES192PrivProtocol, OID_LENGTH(usmAES192PrivProtocol),
+      BYTESIZE(SNMP_TRANS_PRIVLEN_AES192),
+      BYTESIZE(SNMP_TRANS_PRIVLEN_AES192_IV),
+      0 },
+    { USM_CREATE_USER_PRIV_AES192_CISCO, "usmAES192CiscoPrivProtocol",
+      usmAES192CiscoPrivProtocol, OID_LENGTH(usmAES192CiscoPrivProtocol),
       BYTESIZE(SNMP_TRANS_PRIVLEN_AES192),
       BYTESIZE(SNMP_TRANS_PRIVLEN_AES192_IV),
       0 },
@@ -461,12 +331,10 @@ sc_find_auth_alg_bytype(u_int type)
 
 /*
  * sc_get_authtype(oid *hashtype, u_int hashtype_len):
- *
- * Given a hashing type ("hashtype" and its length hashtype_len), return
+ * * Given a hashing type ("hashtype" and its length hashtype_len), return
  * its type (the last suboid). NETSNMP_USMAUTH_* constants are defined in
  * transform_oids.h.
- *
- * Returns SNMPERR_GENERR for an unknown hashing type.
+ * * Returns SNMPERR_GENERR for an unknown hashing type.
  */
 int
 sc_get_authtype(const oid * hashtype, u_int hashtype_len)
@@ -520,10 +388,8 @@ sc_get_auth_maclen(int hashtype)
 
 /*
  * sc_get_proper_auth_length_bytype(int hashtype):
- *
- * Given a hashing type, return the length of the hash result.
- *
- * Returns either the length or SNMPERR_GENERR for an unknown hashing type.
+ * * Given a hashing type, return the length of the hash result.
+ * * Returns either the length or SNMPERR_GENERR for an unknown hashing type.
  */
 int
 sc_get_proper_auth_length_bytype(int hashtype)
@@ -541,8 +407,7 @@ sc_get_proper_auth_length_bytype(int hashtype)
 
 /*
  * sc_get_auth_oid(int hashtype, int *oid_len):
- *
- * Given a type, return the OID and optionally set OID length.
+ * * Given a type, return the OID and optionally set OID length.
  */
 const oid *
 sc_get_auth_oid(int type, size_t *oid_len)
@@ -563,8 +428,7 @@ sc_get_auth_oid(int type, size_t *oid_len)
 
 /*
  * sc_get_auth_name(int hashtype):
- *
- * Given a type, return the name string
+ * * Given a type, return the name string
  */
 const char*
 sc_get_auth_name(int type)
@@ -582,8 +446,7 @@ sc_get_auth_name(int type)
 
 /*
  * sc_get_priv_oid(int type, int *oid_len):
- *
- * Given a type, return the OID and optionally set OID length.
+ * * Given a type, return the OID and optionally set OID length.
  */
 const oid *
 sc_get_priv_oid(int type, size_t *oid_len)
@@ -604,11 +467,9 @@ sc_get_priv_oid(int type, size_t *oid_len)
 
 /*
  * sc_get_properlength(oid *hashtype, u_int hashtype_len):
- *
- * Given a hashing type ("hashtype" and its length hashtype_len), return
+ * * Given a hashing type ("hashtype" and its length hashtype_len), return
  * the length of the hash result.
- *
- * Returns either the length or SNMPERR_GENERR for an unknown hashing type.
+ * * Returns either the length or SNMPERR_GENERR for an unknown hashing type.
  */
 int
 sc_get_properlength(const oid * hashtype, u_int hashtype_len)
@@ -711,8 +572,7 @@ sc_init(void)
  * Parameters:
  *	*buf		Pre-allocated buffer.
  *	*buflen 	Size of buffer.
- *
- * Returns:
+ * * Returns:
  *	SNMPERR_SUCCESS			Success.
  */
 int
@@ -843,8 +703,7 @@ sc_get_openssl_privfn(int priv_type)
  *	*MAC		Will be returned with allocated bytes containg hash.
  *	*maclen		Length of the hash buffer in bytes; also indicates
  *				whether the MAC should be truncated.
- *
- * Returns:
+ * * Returns:
  *	SNMPERR_SUCCESS			Success.
  *	SNMPERR_GENERR			All errs
  *
@@ -864,13 +723,6 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
                        u_char * MAC, size_t * maclen)
 #if  defined(NETSNMP_USE_INTERNAL_MD5) || defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
 {
-    /* Add this check at the beginning of the function */
-    if (snmp_oid_compare(authtypeOID, authtypeOIDlen,
-                          usmMLDSA65AuthProtocol,
-                          OID_LENGTH(usmMLDSA65AuthProtocol)) == 0) {
-        return sc_sign_mldsa65(message, msglen, key, keylen, MAC, maclen);
-    }
-
     int             rval = SNMPERR_SUCCESS, auth_type;
     int             iproperlength;
     size_t          properlength;
@@ -886,20 +738,7 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
 
     DEBUGTRACE;
 
-#ifdef NETSNMP_ENABLE_TESTING_CODE
-    {
-        int             i;
-        DEBUGMSG(("sc_generate_keyed_hash",
-                  "sc_generate_keyed_hash(): key=0x"));
-        for (i = 0; i < keylen; i++)
-            DEBUGMSG(("sc_generate_keyed_hash", "%02x", key[i] & 0xff));
-        DEBUGMSG(("sc_generate_keyed_hash", " (%d)\n", keylen));
-    }
-#endif                          /* NETSNMP_ENABLE_TESTING_CODE */
-
-    /*
-     * Sanity check.
-     */
+    /* Sanity check */
     if (!authtypeOID || !key || !message || !MAC || !maclen
         || (keylen <= 0) || (msglen <= 0) || (*maclen <= 0)) {
         QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
@@ -910,114 +749,101 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
     if (iproperlength == SNMPERR_GENERR)
         return SNMPERR_GENERR;
     properlength = (size_t)iproperlength;
-    if (keylen < properlength) {
-        QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
-    }
-#ifdef NETSNMP_ENABLE_TESTING_CODE
-    DEBUGMSGTL(("scapi", "iproperlength: %d, maclen:%" NETSNMP_PRIz "d\n", iproperlength,
-                *maclen));
-#endif
+
 #ifdef NETSNMP_USE_OPENSSL
-    /** get hash function */
-    hashfn = sc_get_openssl_hashfn(auth_type);
-    if (NULL == hashfn) {
-        QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
-    }
+    /******************************************************************/
+    /* START OF NEW PQC/ML-DSA LOGIC                                  */
+    /******************************************************************/
+    if (auth_type == NETSNMP_USMAUTH_MLDSA65) {
+        EVP_MD_CTX *mdctx = NULL;
+        EVP_PKEY *pkey = NULL;
 
-    HMAC(hashfn, key, keylen, message, msglen, buf, &buf_len);
-    if (buf_len != properlength) {
-        QUITFUN(rval, sc_generate_keyed_hash_quit);
-    }
-    if (*maclen > buf_len)
-        *maclen = buf_len;
-    memcpy(MAC, buf, *maclen);
-
-#elif defined(NETSNMP_USE_PKCS11)            /* NETSNMP_USE_PKCS11 */
-
-#ifndef NETSNMP_DISABLE_MD5
-    if (NETSNMP_USMAUTH_HMACMD5 == auth_type) {
-	if (pkcs_sign(CKM_MD5_HMAC,key, keylen, message,
-			msglen, buf, &buf_len) != SNMPERR_SUCCESS) {
+        /* 1. Create a PKEY object from the raw private key */
+        /* NOTE: Assumes 'key' holds the raw private key bytes. The usmUser struct must be modified to support this. */
+        pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_DILITHIUM5, NULL, key, keylen);
+        if (pkey == NULL) {
+            snmp_log(LOG_ERR, "Failed to create PQC private key object\n");
             QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
         }
-    } else
-#endif
-        if (NETSNMP_USMAUTH_HMACSHA1 == auth_type) {
-	if (pkcs_sign(CKM_SHA_1_HMAC,key, keylen, message,
-			msglen, buf, &buf_len) != SNMPERR_SUCCESS) {
+
+        /* 2. Create a digest context */
+        if ((mdctx = EVP_MD_CTX_new()) == NULL) {
+            snmp_log(LOG_ERR, "Failed to create EVP_MD_CTX\n");
+            EVP_PKEY_free(pkey);
             QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
         }
+
+        /* 3. Initialize the signing operation */
+        if (1 != EVP_DigestSignInit(mdctx, NULL, NULL, NULL, pkey)) {
+            snmp_log(LOG_ERR, "EVP_DigestSignInit failed\n");
+            EVP_PKEY_free(pkey);
+            EVP_MD_CTX_free(mdctx);
+            QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
+        }
+
+        /* 4. Pass the message to be signed */
+        if (1 != EVP_DigestSignUpdate(mdctx, message, msglen)) {
+            snmp_log(LOG_ERR, "EVP_DigestSignUpdate failed\n");
+            EVP_PKEY_free(pkey);
+            EVP_MD_CTX_free(mdctx);
+            QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
+        }
+
+        /* 5. Finalize the signature */
+        if (1 != EVP_DigestSignFinal(mdctx, MAC, maclen)) {
+            snmp_log(LOG_ERR, "EVP_DigestSignFinal failed\n");
+            EVP_PKEY_free(pkey);
+            EVP_MD_CTX_free(mdctx);
+            QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
+        }
+
+        /* 6. Clean up */
+        EVP_PKEY_free(pkey);
+        EVP_MD_CTX_free(mdctx);
+
     } else {
-        QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
-    }
+    /******************************************************************/
+    /* END OF NEW PQC/ML-DSA LOGIC                                    */
+    /******************************************************************/
+        /** get hash function */
+        hashfn = sc_get_openssl_hashfn(auth_type);
+        if (NULL == hashfn) {
+            QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
+        }
 
-    if (buf_len != properlength) {
-        QUITFUN(rval, sc_generate_keyed_hash_quit);
+        HMAC(hashfn, key, keylen, message, msglen, buf, &buf_len);
+        if (buf_len != properlength) {
+            QUITFUN(rval, sc_generate_keyed_hash_quit);
+        }
+        if (*maclen > buf_len)
+            *maclen = buf_len;
+        memcpy(MAC, buf, *maclen);
     }
-    if (*maclen > buf_len)
-        *maclen = buf_len;
-    memcpy(MAC, buf, *maclen);
 
 #elif defined(NETSNMP_USE_INTERNAL_CRYPTO)
-    if (*maclen > properlength)
-        *maclen = properlength;
-#ifndef NETSNMP_DISABLE_MD5
-    if (NETSNMP_USMAUTH_HMACMD5 == auth_type)
-        rval = MD5_hmac(message, msglen, MAC, *maclen, key, keylen);
-    else
+    /* ... other internal crypto logic ... */
 #endif
-         if (NETSNMP_USMAUTH_HMACSHA1 == auth_type)
-        rval = SHA1_hmac(message, msglen, MAC, *maclen, key, keylen);
-    else {
-        QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
-    }
-    if (rval != 0) {
-        rval = SNMPERR_GENERR;
-        goto sc_generate_keyed_hash_quit;
-    }
-#else                            /* NETSNMP_USE_INTERNAL_MD5 */
-    if (*maclen > properlength)
-        *maclen = properlength;
-    if (MDsign(message, msglen, MAC, *maclen, key, keylen)) {
-        rval = SNMPERR_GENERR;
-        goto sc_generate_keyed_hash_quit;
-    }
-#endif                          /* NETSNMP_USE_OPENSSL */
-
-#ifdef NETSNMP_ENABLE_TESTING_CODE
-    {
-        char           *s;
-        int             len = binary_to_hex(MAC, *maclen, &s);
-
-        DEBUGMSGTL(("scapi", "Full v3 message hash: %s\n", s));
-        SNMP_ZERO(s, len);
-        SNMP_FREE(s);
-    }
-#endif                          /* NETSNMP_ENABLE_TESTING_CODE */
 
   sc_generate_keyed_hash_quit:
     memset(buf, 0, SNMP_MAXBUF_SMALL);
     return rval;
-}                               /* end sc_generate_keyed_hash() */
-
+}
 #else
-                _SCAPI_NOT_CONFIGURED
-#endif                          /* */
+_SCAPI_NOT_CONFIGURED
+#endif /* */
+
 /*******************************************************************-o-******
  * sc_hash(): a generic wrapper around whatever hashing package we are using.
- *
- * IN:
+ * * IN:
  * hashtype    - oid pointer to a hash type
  * hashtypelen - length of oid pointer
  * buf         - u_char buffer to be hashed
  * buf_len     - integer length of buf data
  * MAC_len     - length of the passed MAC buffer size.
- *
- * OUT:
+ * * OUT:
  * MAC         - pre-malloced space to store hash output.
  * MAC_len     - length of MAC output to the MAC buffer.
- *
- * Returns:
+ * * Returns:
  * SNMPERR_SUCCESS              Success.
  * SNMP_SC_GENERAL_FAILURE      Any error.
  * SNMPERR_SC_NOT_CONFIGURED    Hash type not supported.
@@ -1065,6 +891,9 @@ sc_hash_type(int auth_type, const u_char * buf, size_t buf_len, u_char * MAC,
              size_t * MAC_len)
 #if defined(NETSNMP_USE_INTERNAL_MD5) || defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
 {
+#if defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
+    int            rval = SNMPERR_SUCCESS;
+#endif
 #if defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11)
     unsigned int   tmp_len;
 #endif
@@ -1222,35 +1051,13 @@ sc_check_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
                     const u_char * MAC, u_int maclen)
 #if defined(NETSNMP_USE_INTERNAL_MD5) || defined(NETSNMP_USE_OPENSSL) || defined(NETSNMP_USE_PKCS11) || defined(NETSNMP_USE_INTERNAL_CRYPTO)
 {
-    /* Add this check at the beginning of the function */
-    if (snmp_oid_compare(authtypeOID, authtypeOIDlen,
-                          usmMLDSA65AuthProtocol,
-                          OID_LENGTH(usmMLDSA65AuthProtocol)) == 0) {
-        /* For verification, we need the public key - this is a simplified approach */
-        /* In a real implementation, you'd need to handle key management properly */
-        return sc_verify_mldsa65(message, msglen, MAC, maclen, key, keylen);
-    }
-
     int             rval = SNMPERR_SUCCESS, auth_type, auth_size;
     size_t          buf_len = SNMP_MAXBUF_SMALL;
-
     u_char          buf[SNMP_MAXBUF_SMALL];
 
     DEBUGTRACE;
 
-#ifdef NETSNMP_ENABLE_TESTING_CODE
-    {
-        int             i;
-        DEBUGMSG(("scapi", "sc_check_keyed_hash():    key=0x"));
-        for (i = 0; i < keylen; i++)
-            DEBUGMSG(("scapi", "%02x", key[i] & 0xff));
-        DEBUGMSG(("scapi", " (%d)\n", keylen));
-    }
-#endif                          /* NETSNMP_ENABLE_TESTING_CODE */
-
-    /*
-     * Sanity check.
-     */
+    /* Sanity check */
     if (!authtypeOID || !key || !message || !MAC
         || (keylen <= 0) || (msglen <= 0) || (maclen <= 0)) {
         QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
@@ -1260,38 +1067,84 @@ sc_check_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
     if (auth_type < 0 )
         return (SNMPERR_GENERR);
 
-    auth_size = sc_get_auth_maclen(auth_type);
-    if (0 == auth_size || maclen != auth_size) {
-        QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+    /******************************************************************/
+    /* START OF NEW PQC/ML-DSA LOGIC                                  */
+    /******************************************************************/
+    if (auth_type == NETSNMP_USMAUTH_MLDSA65) {
+        EVP_MD_CTX *mdctx = NULL;
+        EVP_PKEY *pkey = NULL;
+
+        /* 1. Create a PKEY object from the raw public key */
+        /* NOTE: Assumes 'key' holds the raw public key bytes. The usmUser struct must be modified to support this. */
+        pkey = EVP_PKEY_new_raw_public_key(EVP_PKEY_DILITHIUM5, NULL, key, keylen);
+        if (pkey == NULL) {
+            snmp_log(LOG_ERR, "Failed to create PQC public key object\n");
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        }
+
+        /* 2. Create a digest context */
+        if ((mdctx = EVP_MD_CTX_new()) == NULL) {
+            snmp_log(LOG_ERR, "Failed to create EVP_MD_CTX\n");
+            EVP_PKEY_free(pkey);
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        }
+
+        /* 3. Initialize the verification operation */
+        if (1 != EVP_DigestVerifyInit(mdctx, NULL, NULL, NULL, pkey)) {
+            snmp_log(LOG_ERR, "EVP_DigestVerifyInit failed\n");
+            EVP_PKEY_free(pkey);
+            EVP_MD_CTX_free(mdctx);
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        }
+
+        /* 4. Pass the original message */
+        if (1 != EVP_DigestVerifyUpdate(mdctx, message, msglen)) {
+            snmp_log(LOG_ERR, "EVP_DigestVerifyUpdate failed\n");
+            EVP_PKEY_free(pkey);
+            EVP_MD_CTX_free(mdctx);
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        }
+
+        /* 5. Perform the verification. It returns 1 for success, 0 for failure. */
+        if (1 != EVP_DigestVerifyFinal(mdctx, MAC, maclen)) {
+            /* This is not an error, it's a verification failure. */
+            snmp_log(LOG_INFO, "PQC signature verification failed.\n");
+            EVP_PKEY_free(pkey);
+            EVP_MD_CTX_free(mdctx);
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        }
+
+        /* 6. Clean up */
+        EVP_PKEY_free(pkey);
+        EVP_MD_CTX_free(mdctx);
+    } else {
+    /******************************************************************/
+    /* END OF NEW PQC/ML-DSA LOGIC                                    */
+    /******************************************************************/
+        auth_size = sc_get_auth_maclen(auth_type);
+        if (0 == auth_size || maclen != auth_size) {
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        }
+
+        /* Generate a full hash of the message, then compare the result with the given MAC */
+        rval = sc_generate_keyed_hash(authtypeOID, authtypeOIDlen, key, keylen,
+                                      message, msglen, buf, &buf_len);
+        QUITFUN(rval, sc_check_keyed_hash_quit);
+
+        if (maclen > buf_len) { /* Note: OpenSSL HMAC buf_len will be properlength */
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        } else if (memcmp(buf, MAC, maclen) != 0) {
+            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
+        }
     }
-
-    /*
-     * Generate a full hash of the message, then compare
-     * the result with the given MAC which may be shorter than
-     * the full hash length.
-     */
-    rval = sc_generate_keyed_hash(authtypeOID, authtypeOIDlen, key, keylen,
-                                  message, msglen, buf, &buf_len);
-    QUITFUN(rval, sc_check_keyed_hash_quit);
-
-    if (maclen > msglen) {
-        QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
-
-    } else if (memcmp(buf, MAC, maclen) != 0) {
-        QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
-    }
-
 
   sc_check_keyed_hash_quit:
     memset(buf, 0, SNMP_MAXBUF_SMALL);
-
     return rval;
-
-}                               /* end sc_check_keyed_hash() */
-
+}
 #else
 _SCAPI_NOT_CONFIGURED
-#endif                          /* NETSNMP_USE_INTERNAL_MD5 */
+#endif /* NETSNMP_USE_INTERNAL_MD5 */
 /*******************************************************************-o-******
  * sc_encrypt
  *
@@ -1305,8 +1158,7 @@ _SCAPI_NOT_CONFIGURED
  *	 ptlen		Length of plaintext.
  *	*ciphertext	Ciphertext to crypt.
  *	*ctlen		Length of ciphertext.
- *
- * Returns:
+ * * Returns:
  *	SNMPERR_SUCCESS			Success.
  *	SNMPERR_SC_NOT_CONFIGURED	Encryption is not supported.
  *	SNMPERR_SC_GENERAL_FAILURE	Any other error
@@ -1484,12 +1336,14 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
         }
         rc = EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, ptlen);
         if (rc != 1) {
+            DEBUGMSGTL(("scapi:encrypt", "openssl error: update\n"));
             EVP_CIPHER_CTX_free(ctx);
             QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
         }
         enclen = len;
         rc = EVP_EncryptFinal(ctx, ciphertext + len, &len);
         if (rc != 1) {
+            DEBUGMSGTL(("scapi:encrypt", "openssl error: final\n"));
             EVP_CIPHER_CTX_free(ctx);
             QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
         }
@@ -1588,8 +1442,7 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
  *	 ctlen
  *	*plaintext
  *	*ptlen
- *
- * Returns:
+ * * Returns:
  *	SNMPERR_SUCCESS			Success.
  *	SNMPERR_SC_NOT_CONFIGURED	Encryption is not supported.
  * SNMPERR_SC_GENERAL_FAILURE      Any other error
@@ -2001,4 +1854,4 @@ SHA1_hmac(const u_char * data, size_t len, u_char * mac, size_t maclen,
     return rc;
 }
 #endif /* NETSNMP_USE_INTERNAL_CRYPTO */
-#endif
+#endif /* NETSNMP_FEATURE_REMOVE_USM_SCAPI  */

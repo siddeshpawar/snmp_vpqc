@@ -73,6 +73,18 @@ extern          "C" {
         size_t          privKeyKuLen;
         u_char         *privKey;
         size_t          privKeyLen;
+
+        /************************************************************/
+        /* START OF NEW PQC KEY FIELDS                              */
+        /************************************************************/
+        u_char         *pqc_privkey;
+        size_t          pqc_privkey_len;
+        u_char         *pqc_pubkey;
+        size_t          pqc_pubkey_len;
+        /************************************************************/
+        /* END OF NEW PQC KEY FIELDS                                */
+        /************************************************************/
+
         u_char         *userPublicString;
         size_t          userPublicStringLen;
         int             userStatus;
