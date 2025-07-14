@@ -83,7 +83,15 @@
 #ifdef HAVE_OPENSSL_DH_H
 #include <openssl/dh.h>
 #endif
-
+/*
+ * Placeholder function for PQC key generation from a passphrase seed.
+ * This needs to be implemented using the OQS/OpenSSL libraries.
+ */
+static int
+pqc_keygen_from_seed(const u_char *seed, size_t seed_len,
+                     u_char **pubkey_out, size_t *pubkey_len_out,
+                     u_char **privkey_out, size_t *privkey_len_out);
+                     
 netsnmp_feature_child_of(usm_all, libnetsnmp);
 netsnmp_feature_child_of(usm_support, usm_all);
 
@@ -106,55 +114,6 @@ struct usmStateReference {
     u_int           usr_sec_level;
 };
 
-const oid usmNoAuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
-                                 NETSNMP_USMAUTH_NOAUTH };
-#ifndef NETSNMP_DISABLE_MD5
-const oid usmHMACMD5AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
-                                      NETSNMP_USMAUTH_HMACMD5 };
-#endif
-const oid usmHMACSHA1AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
-                                       NETSNMP_USMAUTH_HMACSHA1 };
-
-#ifdef HAVE_EVP_SHA384
-const oid usmHMAC384SHA512AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
-                                            NETSNMP_USMAUTH_HMAC384SHA512 };
-const oid usmHMAC256SHA384AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
-                                            NETSNMP_USMAUTH_HMAC256SHA384 };
-#endif /* HAVE_EVP_SHA384 */
-
-#ifdef HAVE_EVP_SHA224
-const oid usmHMAC192SHA256AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
-                                            NETSNMP_USMAUTH_HMAC192SHA256 };
-const oid usmHMAC128SHA224AuthProtocol[10] = { NETSNMP_USMAUTH_BASE_OID,
-                                            NETSNMP_USMAUTH_HMAC128SHA224 };
-#endif /* HAVE_EVP_SHA224 */
-
-const oid usmNoPrivProtocol[10] = { 1, 3, 6, 1, 6, 3, 10, 1, 2, 1 };
-
-#ifndef NETSNMP_DISABLE_DES
-const oid usmDESPrivProtocol[10] = { 1, 3, 6, 1, 6, 3, 10, 1, 2, 2 };
-#endif
-
-
-const oid usmAESPrivProtocol[10] = { 1, 3, 6, 1, 6, 3, 10, 1, 2, 4 };
-/* backwards compat */
-const oid *usmAES128PrivProtocol = usmAESPrivProtocol;
-
-#ifdef NETSNMP_DRAFT_BLUMENTHAL_AES_04
-    /* OIDs from http://www.snmp.com/eso/esoConsortiumMIB.txt */
-const oid usmAES192PrivProtocol[9] = { 1,3,6,1,4,1,14832,1,3 };
-const oid usmAES256PrivProtocol[9] = { 1,3,6,1,4,1,14832,1,4 };
-    /* OIDs from CISCO MIB */
-const oid usmAES192CiscoPrivProtocol[11]  = { 1,3,6,1,4,1,9,12,6,1,1 };
-const oid usmAES256CiscoPrivProtocol[11]  = { 1,3,6,1,4,1,9,12,6,1,2 };
-/*
- * these OIDs are in pySNMP source as OIDs for AES+Reeder. We'll just
- * use OIDS from CISCO-SNMP-USM-OIDS-MIB
- *
-const oid usmAES192Cisco2PrivProtocol[11]  = { 1,3,6,1,4,1,9,12,6,1,101 };
-const oid usmAES256Cisco2PrivProtocol[11]  = { 1,3,6,1,4,1,9,12,6,1,102 };
- */
-#endif /* NETSNMP_DRAFT_BLUMENTHAL_AES_04 */
 
 typedef struct usm_alg_type_s {
     const char *label;
@@ -4617,7 +4576,44 @@ usm_set_user_password(struct usmUser *user, const char *token, char *line)
         }
     }
 }                               /* end usm_set_password() */
+/*
+ * This is a stub implementation. You must replace the contents of this function
+ * with calls to your OQS/OpenSSL library to generate a deterministic ML-DSA
+ * key pair from the provided passphrase (seed).
+ */
+static int
+pqc_keygen_from_seed(const u_char *seed, size_t seed_len,
+                     u_char **pubkey_out, size_t *pubkey_len_out,
+                     u_char **privkey_out, size_t *privkey_len_out)
+{
+    /*
+     * OQS/OpenSSL IMPLEMENTATION NEEDED HERE
+     * * Example using liboqs direct API (conceptual):
+     * * OQS_SIG *sig = OQS_SIG_new("dilithium5");
+     * if (sig == NULL) { return SNMPERR_GENERR; }
+     *
+     * *pubkey_out = malloc(sig->length_public_key);
+     * *privkey_out = malloc(sig->length_secret_key);
+     * // Check for malloc failure
+     *
+     * // Use the passphrase as a seed for deterministic key generation
+     * if (OQS_SIG_keygen_seed(sig, *pubkey_out, *privkey_out, seed, seed_len) != OQS_SUCCESS) {
+     * // handle error
+     * OQS_SIG_free(sig);
+     * return SNMPERR_GENERR;
+     * }
+     *
+     * *pubkey_len_out = sig->length_public_key;
+     * *privkey_len_out = sig->length_secret_key;
+     *
+     * OQS_SIG_free(sig);
+     * return SNMPERR_SUCCESS;
+    */
 
+    /* For now, return an error so we know it's not implemented */
+    snmp_log(LOG_ERR, "PQC key generation from seed is not yet implemented.\n");
+    return SNMPERR_GENERR;
+}
 /*
  * create a usm user from a string.
  *
@@ -4642,7 +4638,7 @@ usm_create_usmUser_from_string(char *line, const char **errorMsg)
     size_t          userKeyLen = SNMP_MAXBUF_SMALL;
     size_t          privKeySize;
     size_t          ret;
-    int             ret2, properLen, properPrivKeyLen;
+    int             ret2, properLen = 0, properPrivKeyLen;
     const oid      *def_auth_prot, *def_priv_prot;
     size_t          def_auth_prot_len, def_priv_prot_len;
     const netsnmp_priv_alg_info *pai;
