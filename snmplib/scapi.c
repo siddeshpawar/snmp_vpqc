@@ -760,11 +760,11 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
 
         /* 1. Create a PKEY object from the raw private key */
         /* NOTE: Assumes 'key' holds the raw private key bytes. The usmUser struct must be modified to support this. */
-        pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_DILITHIUM5, NULL, key, keylen);
-        if (pkey == NULL) {
-            snmp_log(LOG_ERR, "Failed to create PQC private key object\n");
-            QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
-        }
+        pkey = EVP_PKEY_new_raw_private_key_ex(NULL, "mldsa65", NULL, key, keylen);
+		if (pkey == NULL) {
+    		snmp_log(LOG_ERR, "Failed to create PQC private key object\n");
+    		QUITFUN(SNMPERR_GENERR, sc_generate_keyed_hash_quit);
+		}
 
         /* 2. Create a digest context */
         if ((mdctx = EVP_MD_CTX_new()) == NULL) {
@@ -1075,8 +1075,8 @@ sc_check_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
         EVP_PKEY *pkey = NULL;
 
         /* 1. Create a PKEY object from the raw public key */
-        /* NOTE: Assumes 'key' holds the raw public key bytes. The usmUser struct must be modified to support this. */
-        pkey = EVP_PKEY_new_raw_public_key(EVP_PKEY_DILITHIUM5, NULL, key, keylen);
+        /* THIS IS THE CORRECTED LINE */
+        pkey = EVP_PKEY_new_raw_public_key_ex(NULL, "mldsa65", NULL, key, keylen);
         if (pkey == NULL) {
             snmp_log(LOG_ERR, "Failed to create PQC public key object\n");
             QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
@@ -1118,25 +1118,6 @@ sc_check_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
         EVP_PKEY_free(pkey);
         EVP_MD_CTX_free(mdctx);
     } else {
-    /******************************************************************/
-    /* END OF NEW PQC/ML-DSA LOGIC                                    */
-    /******************************************************************/
-        auth_size = sc_get_auth_maclen(auth_type);
-        if (0 == auth_size || maclen != auth_size) {
-            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
-        }
-
-        /* Generate a full hash of the message, then compare the result with the given MAC */
-        rval = sc_generate_keyed_hash(authtypeOID, authtypeOIDlen, key, keylen,
-                                      message, msglen, buf, &buf_len);
-        QUITFUN(rval, sc_check_keyed_hash_quit);
-
-        if (maclen > buf_len) { /* Note: OpenSSL HMAC buf_len will be properlength */
-            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
-        } else if (memcmp(buf, MAC, maclen) != 0) {
-            QUITFUN(SNMPERR_GENERR, sc_check_keyed_hash_quit);
-        }
-    }
 
   sc_check_keyed_hash_quit:
     memset(buf, 0, SNMP_MAXBUF_SMALL);
