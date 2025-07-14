@@ -755,8 +755,7 @@ sc_generate_keyed_hash(const oid * authtypeOID, size_t authtypeOIDlen,
     /* START OF NEW PQC/ML-DSA LOGIC                                  */
     /******************************************************************/
     if (auth_type == NETSNMP_USMAUTH_MLDSA65) {
-        EVP_MD_CTX *mdctx = NULL;
-        EVP_PKEY *pkey = NULL;
+
 
         /* 1. Create a PKEY object from the raw private key */
         /* NOTE: Assumes 'key' holds the raw private key bytes. The usmUser struct must be modified to support this. */
@@ -901,6 +900,9 @@ sc_hash_type(int auth_type, const u_char * buf, size_t buf_len, u_char * MAC,
 
 #ifdef NETSNMP_USE_OPENSSL
     const EVP_MD   *hashfn;
+    EVP_MD_CTX *mdctx = NULL;
+    EVP_PKEY *pkey = NULL;
+
     EVP_MD_CTX     *cptr;
 #endif
 #ifdef NETSNMP_USE_INTERNAL_CRYPTO
