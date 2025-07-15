@@ -203,15 +203,16 @@ static void print_pqc_error_help(void)
 }
 
 /* Add this function to validate PQC-specific parameters */
-static int validate_pqc_auth_params(netsnmp_session *session)
+static int
+validate_pqc_auth_params(netsnmp_session *session, const char* passphrase)
 {
     /* Check if ML-DSA65 is being used */
     if (session->securityAuthProto &&
         snmp_oid_compare(session->securityAuthProto, session->securityAuthProtoLen,
                          usmMLDSA65AuthProtocol, OID_LENGTH(usmMLDSA65AuthProtocol)) == 0) {
 
-        /* Validate authentication passphrase length for PQC */
-        if (session->securityAuthKeyLen < 32) {
+        /* CORRECTED CHECK: Validate the actual passphrase length */
+        if (passphrase && (strlen(passphrase) < 32)) {
             fprintf(stderr, "Error: ML-DSA65 authentication requires a passphrase of at least 32 characters\n");
             return SNMPERR_GENERR;
         }
@@ -221,15 +222,11 @@ static int validate_pqc_auth_params(netsnmp_session *session)
             fprintf(stderr, "Error: ML-DSA65 requires authentication security level\n");
             return SNMPERR_GENERR;
         }
-
-        /* Recommend higher security for PQC */
-        if (session->securityLevel == SNMP_SEC_LEVEL_AUTHNOPRIV) {
-            fprintf(stderr, "Warning: For PQC authentication, consider using authPriv security level\n");
-        }
     }
 
     return SNMPERR_SUCCESS;
 }
+
 
 
 int
@@ -606,6 +603,18 @@ netsnmp_parse_args(int argc,
      * make master key from pass phrases
      */
     if (Apsz) {
+    /************************************************************/
+    /* START OF NEW CODE TO ADD                                 */
+    /************************************************************/
+    int auth_type = sc_get_authtype(session->securityAuthProto,
+                                    session->securityAuthProtoLen);
+
+    /* Only generate a Ku for non-PQC hash-based algorithms */
+    if (auth_type != NETSNMP_USMAUTH_MLDSA65) {
+    /************************************************************/
+    /* END OF NEW CODE                                          */
+    /************************************************************/
+        
         session->securityAuthKeyLen = USM_AUTH_KU_LEN;
         if (session->securityAuthProto == NULL) {
             /*
@@ -634,7 +643,14 @@ netsnmp_parse_args(int argc,
             ret = NETSNMP_PARSE_ARGS_ERROR;
             goto out;
         }
-        free(Apsz);
+    /************************************************************/
+    /* START OF NEW CODE TO ADD                                 */
+    /************************************************************/
+    }
+    /************************************************************/
+    /* END OF NEW CODE                                          */
+    /************************************************************/
+    free(Apsz);
         Apsz = NULL;
     }
     if (Xpsz) {
@@ -671,7 +687,7 @@ netsnmp_parse_args(int argc,
 #endif /* NETSNMP_SECMOD_USM */
 
     /* Add this validation call before the final return statement */
-    if (validate_pqc_auth_params(session) != SNMPERR_SUCCESS) {
+    if (validate_pqc_auth_params(session, Apsz) != SNMPERR_SUCCESS) {
         ret = SNMPERR_GENERR;
         goto out;
     }
